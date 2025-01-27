@@ -1,65 +1,127 @@
 import tkinter as tk
-from tkinter import messagebox
+from tkinter import ttk, messagebox
 from job_scraper import JobScraper
 
 class JobScraperGUI:
     def __init__(self, master):
         self.master = master
         master.title("Job Scraper Configuration")
+        
+        # Create main frame
+        self.main_frame = ttk.Frame(master, padding="10")
+        self.main_frame.pack(fill=tk.BOTH, expand=True)
+
+        # Basic Settings
+        self.create_basic_settings()
+        
+        # Advanced Settings
+        self.create_advanced_settings()
+
+        # Submit Button
+        self.submit_button = ttk.Button(self.main_frame, text="Start Scraper", command=self.start_scraper)
+        self.submit_button.pack(pady=10)
+
+    def create_basic_settings(self):
+        # Basic settings frame
+        basic_frame = ttk.LabelFrame(self.main_frame, text="Basic Settings", padding="5")
+        basic_frame.pack(fill=tk.X, padx=5, pady=5)
 
         # Keywords
-        self.keywords_label = tk.Label(master, text="Keywords (comma separated):")
-        self.keywords_label.pack()
-        self.keywords_entry = tk.Entry(master)
-        self.keywords_entry.pack()
+        ttk.Label(basic_frame, text="Keywords (comma separated):").pack()
+        self.keywords_entry = ttk.Entry(basic_frame)
+        self.keywords_entry.pack(fill=tk.X)
 
         # Job Title
-        self.job_title_label = tk.Label(master, text="Job Title:")
-        self.job_title_label.pack()
-        self.job_title_entry = tk.Entry(master)
-        self.job_title_entry.pack()
+        ttk.Label(basic_frame, text="Job Title:").pack()
+        self.job_title_entry = ttk.Entry(basic_frame)
+        self.job_title_entry.pack(fill=tk.X)
 
         # Salary Range
-        self.salary_label = tk.Label(master, text="Salary Range (min, max):")
-        self.salary_label.pack()
-        self.salary_min_entry = tk.Entry(master)
-        self.salary_min_entry.pack()
-        self.salary_max_entry = tk.Entry(master)
-        self.salary_max_entry.pack()
+        salary_frame = ttk.Frame(basic_frame)
+        salary_frame.pack(fill=tk.X)
+        ttk.Label(salary_frame, text="Salary Range:").pack()
+        self.salary_min_entry = ttk.Entry(salary_frame, width=15)
+        self.salary_min_entry.pack(side=tk.LEFT, padx=5)
+        ttk.Label(salary_frame, text="to").pack(side=tk.LEFT)
+        self.salary_max_entry = ttk.Entry(salary_frame, width=15)
+        self.salary_max_entry.pack(side=tk.LEFT, padx=5)
 
         # Resume
-        self.resume_label = tk.Label(master, text="Resume File Path:")
-        self.resume_label.pack()
-        self.resume_entry = tk.Entry(master)
-        self.resume_entry.pack()
+        ttk.Label(basic_frame, text="Resume File Path:").pack()
+        self.resume_entry = ttk.Entry(basic_frame)
+        self.resume_entry.pack(fill=tk.X)
 
-        # Remote Only and Location Frame
-        self.location_frame = tk.Frame(master)
-        self.location_frame.pack(pady=10)
-
+        # Location Settings
+        location_frame = ttk.Frame(basic_frame)
+        location_frame.pack(fill=tk.X, pady=5)
+        
         # Remote Only
-        self.remote_var = tk.BooleanVar()
-        self.remote_checkbox = tk.Checkbutton(
-            self.location_frame, 
+        self.remote_var = tk.BooleanVar(value=True)
+        self.remote_checkbox = ttk.Checkbutton(
+            location_frame, 
             text="Remote Only", 
             variable=self.remote_var,
             command=self.toggle_location
         )
-        self.remote_checkbox.pack(side=tk.LEFT, padx=5)
+        self.remote_checkbox.pack(side=tk.LEFT)
 
         # Location
-        self.location_label = tk.Label(self.location_frame, text="Location:")
-        self.location_label.pack(side=tk.LEFT, padx=5)
-        self.location_entry = tk.Entry(self.location_frame)
-        self.location_entry.pack(side=tk.LEFT, padx=5)
-        
-        # Set initial state
-        self.remote_var.set(True)  # Default to remote
-        self.toggle_location()  # Initial toggle
+        self.location_entry = ttk.Entry(location_frame)
+        self.location_entry.pack(side=tk.LEFT, padx=5, fill=tk.X, expand=True)
+        self.toggle_location()  # Initial state
 
-        # Submit Button
-        self.submit_button = tk.Button(master, text="Start Scraper", command=self.start_scraper)
-        self.submit_button.pack(pady=10)
+    def create_advanced_settings(self):
+        # Advanced settings button
+        self.advanced_var = tk.BooleanVar()
+        self.advanced_button = ttk.Checkbutton(
+            self.main_frame,
+            text="Advanced Settings",
+            variable=self.advanced_var,
+            command=self.toggle_advanced_settings
+        )
+        self.advanced_button.pack(pady=5)
+
+        # Advanced settings frame
+        self.advanced_frame = ttk.LabelFrame(self.main_frame, text="Advanced Settings", padding="5")
+        
+        # Distance
+        distance_frame = ttk.Frame(self.advanced_frame)
+        distance_frame.pack(fill=tk.X, pady=5)
+        ttk.Label(distance_frame, text="Distance (miles):").pack(side=tk.LEFT)
+        self.distance_entry = ttk.Entry(distance_frame, width=10)
+        self.distance_entry.pack(side=tk.LEFT, padx=5)
+
+        # Experience Level
+        exp_frame = ttk.LabelFrame(self.advanced_frame, text="Experience Level", padding="5")
+        exp_frame.pack(fill=tk.X, pady=5)
+        
+        self.exp_vars = {
+            "Entry Level": tk.BooleanVar(),
+            "Mid Level": tk.BooleanVar(),
+            "Senior Level": tk.BooleanVar()
+        }
+        
+        for level, var in self.exp_vars.items():
+            ttk.Checkbutton(exp_frame, text=level, variable=var).pack(anchor=tk.W)
+
+        # Education Level
+        edu_frame = ttk.LabelFrame(self.advanced_frame, text="Education Level", padding="5")
+        edu_frame.pack(fill=tk.X, pady=5)
+        
+        self.edu_var = tk.StringVar(value="All Education Levels")
+        education_levels = ["All Education Levels", "Bachelor's Degree", "Master's Degree"]
+        
+        for level in education_levels:
+            ttk.Radiobutton(edu_frame, text=level, variable=self.edu_var, value=level).pack(anchor=tk.W)
+
+        # Initially hide advanced settings
+        self.advanced_frame.pack_forget()
+
+    def toggle_advanced_settings(self):
+        if self.advanced_var.get():
+            self.advanced_frame.pack(fill=tk.X, padx=5, pady=5)
+        else:
+            self.advanced_frame.pack_forget()
 
     def toggle_location(self):
         if self.remote_var.get():
@@ -70,21 +132,39 @@ class JobScraperGUI:
 
     def start_scraper(self):
         try:
+            # Get basic settings
             keywords = [k.strip() for k in self.keywords_entry.get().split(",")]
             job_title = self.job_title_entry.get().strip()
-            salary_range = (int(self.salary_min_entry.get()), int(self.salary_max_entry.get()))
+            salary_range = (
+                int(self.salary_min_entry.get() or 0),
+                int(self.salary_max_entry.get() or 0)
+            )
             resume = self.resume_entry.get().strip()
             remote_only = self.remote_var.get()
             location = None if remote_only else self.location_entry.get().strip()
 
+            # Get advanced settings
+            distance = int(self.distance_entry.get()) if self.distance_entry.get() else None
+            experience_levels = [
+                level for level, var in self.exp_vars.items()
+                if var.get()
+            ]
+            education_level = (
+                None if self.edu_var.get() == "All Education Levels"
+                else self.edu_var.get()
+            )
+
             # Create JobScraper instance and start scraping
             scraper = JobScraper(
-                keywords=keywords, 
-                job_title=job_title, 
-                salary_range=salary_range, 
-                resume=resume, 
+                keywords=keywords,
+                job_title=job_title,
+                salary_range=salary_range,
+                resume=resume,
                 remote_only=remote_only,
-                location=location
+                location=location,
+                distance=distance,
+                experience_levels=experience_levels,
+                education_level=education_level
             )
             scraper.scrape_indeed()
             messagebox.showinfo("Success", "Job scraping completed successfully!")

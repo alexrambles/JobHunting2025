@@ -14,13 +14,18 @@ import os
 import datetime
 
 class JobScraper:
-    def __init__(self, keywords=None, job_title=None, salary_range=None, resume=None, remote_only=True, location=None):
+    def __init__(self, keywords=None, job_title=None, salary_range=None, resume=None, 
+                 remote_only=True, location=None, distance=None, 
+                 experience_levels=None, education_level=None):
         self.keywords = keywords or []
         self.job_title = job_title
         self.salary_range = salary_range
         self.resume = resume
         self.remote_only = remote_only
         self.location = location
+        self.distance = distance  # Distance in miles
+        self.experience_levels = experience_levels or []
+        self.education_level = education_level
         self.jobs = []
         self.user_agent = UserAgent()
         self.driver = None
@@ -179,17 +184,44 @@ class JobScraper:
                 print("Filtering for remote jobs only")
             elif self.location:
                 print(f"Searching in location: {self.location}")
+                if self.distance:
+                    print(f"Within {self.distance} miles")
                 
             self.setup_driver()
             
-            # Build the URL
+            # Build the URL with advanced filters
             base_url = "https://www.indeed.com/jobs"
             params = {
                 'q': search_query,
                 'l': 'Remote' if self.remote_only else (self.location or ''),
                 'sc': '0kf:attr(DSQF7)' if self.remote_only else '',  # Remote jobs filter
+                'radius': self.distance if self.distance else '',  # Distance in miles
                 'vjk': 'all'
             }
+
+            # Add experience level filters
+            if self.experience_levels:
+                exp_params = []
+                for level in self.experience_levels:
+                    if level == "Entry Level":
+                        exp_params.append("explvl(ENTRY_LEVEL)")
+                    elif level == "Mid Level":
+                        exp_params.append("explvl(MID_LEVEL)")
+                    elif level == "Senior Level":
+                        exp_params.append("explvl(SENIOR_LEVEL)")
+                if exp_params:
+                    params['sc'] = f"{params['sc']},{''.join(exp_params)}"
+
+            # Add education level filter
+            if self.education_level:
+                edu_param = ""
+                if self.education_level == "Bachelor's Degree":
+                    edu_param = "attr(FCGTU)|attr(HFDVW)"  # Indeed's parameter for Bachelor's
+                elif self.education_level == "Master's Degree":
+                    edu_param = "attr(FCGTU)|attr(HFDVW)|attr(QXQQS)"  # Include Master's
+                if edu_param:
+                    params['sc'] = f"{params['sc']},{edu_param}"
+
             url = f"{base_url}?{urllib.parse.urlencode(params)}"
             
             if not self.handle_page_load(url):
@@ -265,7 +297,10 @@ if __name__ == '__main__':
             job_title='Business Intelligence Developer',
             salary_range=(90000, 120000),
             resume='path/to/resume',
-            remote_only=True
+            remote_only=True,
+            distance=50,
+            experience_levels=["Mid Level"],
+            education_level="Bachelor's Degree"
         )
         scraper.scrape_indeed()
     except Exception as e:
