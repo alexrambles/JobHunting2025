@@ -17,6 +17,9 @@ class JobScraperGUI:
         # Advanced Settings
         self.create_advanced_settings()
 
+        # Rating Settings
+        self.create_rating_settings()
+
         # Submit Button
         self.submit_button = ttk.Button(self.main_frame, text="Start Scraper", command=self.start_scraper)
         self.submit_button.pack(pady=10)
@@ -117,6 +120,27 @@ class JobScraperGUI:
         # Initially hide advanced settings
         self.advanced_frame.pack_forget()
 
+    def create_rating_settings(self):
+        # Rating settings frame
+        rating_frame = ttk.LabelFrame(self.main_frame, text="Rating Settings", padding="5")
+        rating_frame.pack(fill=tk.X, padx=5, pady=5)
+
+        # Salary Threshold
+        ttk.Label(rating_frame, text="Salary Threshold for High Rating:").pack()
+        self.salary_threshold_entry = ttk.Entry(rating_frame)
+        self.salary_threshold_entry.pack(fill=tk.X)
+
+        # Experience Requirement
+        self.experience_req_var = tk.BooleanVar()
+        self.experience_req_checkbox = ttk.Checkbutton(
+            rating_frame,
+            text="Require Specific Experience Level for High Rating",
+            variable=self.experience_req_var
+        )
+        self.experience_req_checkbox.pack()
+
+        # Add other rating criteria as needed
+
     def toggle_advanced_settings(self):
         if self.advanced_var.get():
             self.advanced_frame.pack(fill=tk.X, padx=5, pady=5)
@@ -154,6 +178,10 @@ class JobScraperGUI:
                 else self.edu_var.get()
             )
 
+            # Get rating settings
+            salary_threshold = int(self.salary_threshold_entry.get() or 0)
+            require_experience = self.experience_req_var.get()
+
             # Create JobScraper instance and start scraping
             scraper = JobScraper(
                 keywords=keywords,
@@ -164,7 +192,9 @@ class JobScraperGUI:
                 location=location,
                 distance=distance,
                 experience_levels=experience_levels,
-                education_level=education_level
+                education_level=education_level,
+                salary_threshold=salary_threshold,
+                require_experience=require_experience
             )
             scraper.scrape_indeed()
             messagebox.showinfo("Success", "Job scraping completed successfully!")
