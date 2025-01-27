@@ -33,14 +33,40 @@ class JobScraperGUI:
         self.resume_entry = tk.Entry(master)
         self.resume_entry.pack()
 
+        # Remote Only and Location Frame
+        self.location_frame = tk.Frame(master)
+        self.location_frame.pack(pady=10)
+
         # Remote Only
         self.remote_var = tk.BooleanVar()
-        self.remote_checkbox = tk.Checkbutton(master, text="Remote Only", variable=self.remote_var)
-        self.remote_checkbox.pack()
+        self.remote_checkbox = tk.Checkbutton(
+            self.location_frame, 
+            text="Remote Only", 
+            variable=self.remote_var,
+            command=self.toggle_location
+        )
+        self.remote_checkbox.pack(side=tk.LEFT, padx=5)
+
+        # Location
+        self.location_label = tk.Label(self.location_frame, text="Location:")
+        self.location_label.pack(side=tk.LEFT, padx=5)
+        self.location_entry = tk.Entry(self.location_frame)
+        self.location_entry.pack(side=tk.LEFT, padx=5)
+        
+        # Set initial state
+        self.remote_var.set(True)  # Default to remote
+        self.toggle_location()  # Initial toggle
 
         # Submit Button
         self.submit_button = tk.Button(master, text="Start Scraper", command=self.start_scraper)
-        self.submit_button.pack()
+        self.submit_button.pack(pady=10)
+
+    def toggle_location(self):
+        if self.remote_var.get():
+            self.location_entry.config(state='disabled')
+            self.location_entry.delete(0, tk.END)
+        else:
+            self.location_entry.config(state='normal')
 
     def start_scraper(self):
         try:
@@ -49,9 +75,17 @@ class JobScraperGUI:
             salary_range = (int(self.salary_min_entry.get()), int(self.salary_max_entry.get()))
             resume = self.resume_entry.get().strip()
             remote_only = self.remote_var.get()
+            location = None if remote_only else self.location_entry.get().strip()
 
             # Create JobScraper instance and start scraping
-            scraper = JobScraper(keywords=keywords, job_title=job_title, salary_range=salary_range, resume=resume, remote_only=remote_only)
+            scraper = JobScraper(
+                keywords=keywords, 
+                job_title=job_title, 
+                salary_range=salary_range, 
+                resume=resume, 
+                remote_only=remote_only,
+                location=location
+            )
             scraper.scrape_indeed()
             messagebox.showinfo("Success", "Job scraping completed successfully!")
         except Exception as e:

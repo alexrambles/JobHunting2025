@@ -11,14 +11,16 @@ from selenium.webdriver.support import expected_conditions as EC
 from selenium.common.exceptions import TimeoutException, NoSuchElementException
 from bs4 import BeautifulSoup
 import os
+import datetime
 
 class JobScraper:
-    def __init__(self, keywords, job_title, salary_range, resume, remote_only=False):
-        self.keywords = keywords
+    def __init__(self, keywords=None, job_title=None, salary_range=None, resume=None, remote_only=True, location=None):
+        self.keywords = keywords or []
         self.job_title = job_title
         self.salary_range = salary_range
         self.resume = resume
         self.remote_only = remote_only
+        self.location = location
         self.jobs = []
         self.user_agent = UserAgent()
         self.driver = None
@@ -111,25 +113,30 @@ class JobScraper:
         return 2
 
     def save_results(self):
-        """Save job results to CSV"""
-        try:
-            if not self.jobs:
-                print("No jobs to save!")
-                return False
-
-            df = pd.DataFrame(self.jobs)
-            output_file = os.path.abspath('job_results.csv')
-            df.to_csv(output_file, index=False, encoding='utf-8')
+        """Save job results to CSV file in Documents folder"""
+        if not self.jobs:
+            return
             
-            print(f"\nSaved {len(self.jobs)} jobs to: {output_file}")
-            for rating, desc in [(1, "Match requirements"), (2, "Partial match"), (3, "Overqualified")]:
-                count = len(df[df['rating'] == rating])
-                print(f"Rating {rating} ({desc}): {count}")
-            
-            return True
-        except Exception as e:
-            print(f"Error saving results: {str(e)}")
-            return False
+        # Get Documents folder path and create filename with current date
+        documents_path = os.path.expanduser('~/Documents')
+        current_date = datetime.datetime.now().strftime('%Y-%m-%d')
+        filename = f'job_results_{current_date}.csv'
+        filepath = os.path.join(documents_path, filename)
+        
+        # Create DataFrame and save to CSV
+        df = pd.DataFrame(self.jobs)
+        df.to_csv(filepath, index=False)
+        print(f"\nSaved {len(self.jobs)} jobs to: {filepath}")
+        
+        # Print job ratings summary
+        ratings = df['rating'].value_counts().sort_index()
+        for rating, count in ratings.items():
+            rating_desc = {
+                1: "Match requirements",
+                2: "Partial match",
+                3: "Overqualified"
+            }.get(rating, "Unknown")
+            print(f"Rating {rating} ({rating_desc}): {count}")
 
     def extract_job_details(self, job_soup):
         """Extract job details from soup"""
@@ -162,23 +169,28 @@ class JobScraper:
         return summary, salary_text
 
     def scrape_indeed(self):
-        """Scrape jobs from Indeed"""
+        print("Starting job scraper...")
+        
         try:
-            print(f"Searching Indeed for '{self.keywords}' jobs...")
+            # Format search query
+            search_query = self.job_title if self.job_title else ' '.join(self.keywords)
+            print(f"Searching Indeed for '{search_query}' jobs...")
             if self.remote_only:
                 print("Filtering for remote jobs only")
-            
+            elif self.location:
+                print(f"Searching in location: {self.location}")
+                
             self.setup_driver()
             
-            # Build search URL
+            # Build the URL
+            base_url = "https://www.indeed.com/jobs"
             params = {
-                'q': f"{self.keywords} remote" if self.remote_only else self.keywords,
-                'l': 'Remote' if self.remote_only else '',
-                'fromage': '14',
-                'sort': 'date',
-                'sc': '0kf:attr(DSQF7)' if self.remote_only else ''
+                'q': search_query,
+                'l': 'Remote' if self.remote_only else (self.location or ''),
+                'sc': '0kf:attr(DSQF7)' if self.remote_only else '',  # Remote jobs filter
+                'vjk': 'all'
             }
-            url = f"https://www.indeed.com/jobs?{urllib.parse.urlencode(params)}"
+            url = f"{base_url}?{urllib.parse.urlencode(params)}"
             
             if not self.handle_page_load(url):
                 return
@@ -239,9 +251,6 @@ class JobScraper:
             
             print(f"\nProcessed {len(self.jobs)} jobs from Indeed")
             self.save_results()
-            
-        except Exception as e:
-            print(f"Error during scraping: {str(e)}")
         finally:
             if self.driver:
                 try:
@@ -251,7 +260,6 @@ class JobScraper:
 
 if __name__ == '__main__':
     try:
-        print("Starting job scraper...")
         scraper = JobScraper(
             keywords='business intelligence data analyst Tableau',
             job_title='Business Intelligence Developer',
