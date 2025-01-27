@@ -17,8 +17,8 @@ class JobScraper:
     def __init__(self, keywords=None, job_title=None, salary_range=None, resume=None, 
                  remote_only=True, location=None, distance=None, 
                  experience_levels=None, education_level=None,
-                 include_no_salary=True, top_percent=10, bottom_percent=10,
-                 require_experience=True):
+                 include_no_salary=False, top_percent=10, bottom_percent=10,
+                 require_experience=False):
         self.keywords = keywords or []
         self.job_title = job_title
         self.salary_range = salary_range
@@ -120,7 +120,7 @@ class JobScraper:
             return None  # Job will be filtered out
             
         if not salary:
-            return 2  # Partial match for unspecified salary
+            return None  # Changed: Don't include jobs without salary unless explicitly allowed
             
         min_salary, max_salary = self.salary_range
         salary_range = max_salary - min_salary
@@ -129,11 +129,18 @@ class JobScraper:
         top_threshold = max_salary - (salary_range * (self.top_percent / 100))
         bottom_threshold = min_salary + (salary_range * (self.bottom_percent / 100))
         
-        # Initial rating based on salary
-        if salary >= top_threshold:
+        # Calculate buffer zone around bottom threshold (10% up and down)
+        buffer_size = bottom_threshold * (self.bottom_percent / 100)
+        bottom_buffer_low = bottom_threshold - buffer_size
+        bottom_buffer_high = bottom_threshold + buffer_size
+        
+        # Exclude jobs below the buffer zone
+        if salary < bottom_buffer_low:
+            return None   
+        elif salary >= top_threshold:  # Initial rating based on salary
             rating = 1  # High rating
-        elif salary <= bottom_threshold:
-            rating = 3  # Low rating
+        elif bottom_buffer_low <= salary <= bottom_buffer_high:
+            rating = 3  # Within bottom threshold buffer zone
         else:
             rating = 2  # Within normal range
         
@@ -153,9 +160,11 @@ class JobScraper:
             return
             
         # Filter out jobs with no salary if include_no_salary is False
+        # Also filter out jobs that were rated as None (below bottom buffer)
         filtered_jobs = [
             job for job in self.jobs 
-            if job.get('rating') is not None
+            if (job.get('rating') is not None and # Rating is not None
+                (self.include_no_salary or job.get('salary_value') is not None))  # Has salary if required
         ]
         
         if not filtered_jobs:
@@ -363,13 +372,9 @@ if __name__ == '__main__':
             salary_range=(90000, 120000),
             resume='path/to/resume',
             remote_only=True,
-            distance=50,
-            experience_levels=["Mid Level"],
-            education_level="Bachelor's Degree",
-            include_no_salary=True,
+            include_no_salary=False,
             top_percent=10,
-            bottom_percent=10,
-            require_experience=True
+            bottom_percent=10
         )
         scraper.scrape_indeed()
     except Exception as e:
