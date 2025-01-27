@@ -17,9 +17,6 @@ class JobScraperGUI:
         # Advanced Settings
         self.create_advanced_settings()
 
-        # Rating Settings
-        self.create_rating_settings()
-
         # Submit Button
         self.submit_button = ttk.Button(self.main_frame, text="Start Scraper", command=self.start_scraper)
         self.submit_button.pack(pady=10)
@@ -30,7 +27,7 @@ class JobScraperGUI:
         basic_frame.pack(fill=tk.X, padx=5, pady=5)
 
         # Keywords
-        ttk.Label(basic_frame, text="Keywords (comma separated):").pack()
+        ttk.Label(basic_frame, text="Keywords (comma-separated):").pack()
         self.keywords_entry = ttk.Entry(basic_frame)
         self.keywords_entry.pack(fill=tk.X)
 
@@ -41,37 +38,46 @@ class JobScraperGUI:
 
         # Salary Range
         salary_frame = ttk.Frame(basic_frame)
-        salary_frame.pack(fill=tk.X)
-        ttk.Label(salary_frame, text="Salary Range:").pack()
+        salary_frame.pack(fill=tk.X, pady=5)
+        ttk.Label(salary_frame, text="Salary Range:").pack(side=tk.LEFT)
         self.salary_min_entry = ttk.Entry(salary_frame, width=15)
         self.salary_min_entry.pack(side=tk.LEFT, padx=5)
         ttk.Label(salary_frame, text="to").pack(side=tk.LEFT)
         self.salary_max_entry = ttk.Entry(salary_frame, width=15)
         self.salary_max_entry.pack(side=tk.LEFT, padx=5)
 
-        # Resume
-        ttk.Label(basic_frame, text="Resume File Path:").pack()
+        # Include No Salary Toggle
+        self.include_no_salary_var = tk.BooleanVar(value=False)
+        self.include_no_salary_checkbox = ttk.Checkbutton(
+            basic_frame,
+            text="Include Jobs Without Specified Salary",
+            variable=self.include_no_salary_var
+        )
+        self.include_no_salary_checkbox.pack(pady=5)
+
+        # Resume Path
+        ttk.Label(basic_frame, text="Resume Path:").pack()
         self.resume_entry = ttk.Entry(basic_frame)
         self.resume_entry.pack(fill=tk.X)
 
-        # Location Settings
-        location_frame = ttk.Frame(basic_frame)
-        location_frame.pack(fill=tk.X, pady=5)
-        
-        # Remote Only
+        # Remote/Location Toggle
         self.remote_var = tk.BooleanVar(value=True)
         self.remote_checkbox = ttk.Checkbutton(
-            location_frame, 
-            text="Remote Only", 
+            basic_frame,
+            text="Remote Only",
             variable=self.remote_var,
             command=self.toggle_location
         )
-        self.remote_checkbox.pack(side=tk.LEFT)
+        self.remote_checkbox.pack()
 
-        # Location
-        self.location_entry = ttk.Entry(location_frame)
+        # Location Entry (initially hidden)
+        self.location_frame = ttk.Frame(basic_frame)
+        ttk.Label(self.location_frame, text="Location:").pack(side=tk.LEFT)
+        self.location_entry = ttk.Entry(self.location_frame)
         self.location_entry.pack(side=tk.LEFT, padx=5, fill=tk.X, expand=True)
-        self.toggle_location()  # Initial state
+        
+        if not self.remote_var.get():
+            self.location_frame.pack(fill=tk.X, pady=5)
 
     def create_advanced_settings(self):
         # Advanced settings button
@@ -117,29 +123,56 @@ class JobScraperGUI:
         for level in education_levels:
             ttk.Radiobutton(edu_frame, text=level, variable=self.edu_var, value=level).pack(anchor=tk.W)
 
+        # Rating Settings
+        self.create_rating_settings()
+
         # Initially hide advanced settings
         self.advanced_frame.pack_forget()
 
     def create_rating_settings(self):
-        # Rating settings frame
-        rating_frame = ttk.LabelFrame(self.main_frame, text="Rating Settings", padding="5")
-        rating_frame.pack(fill=tk.X, padx=5, pady=5)
-
-        # Salary Threshold
-        ttk.Label(rating_frame, text="Salary Threshold for High Rating:").pack()
-        self.salary_threshold_entry = ttk.Entry(rating_frame)
-        self.salary_threshold_entry.pack(fill=tk.X)
+        # Rating Settings Frame
+        self.rating_frame = ttk.LabelFrame(self.advanced_frame, text="Rating Criteria", padding="5")
+        
+        # Default Rating Info
+        ttk.Label(self.rating_frame, text="Default Rating System:").pack(anchor=tk.W, pady=(5,0))
+        ttk.Label(self.rating_frame, text="Rating 1: Salary in top 10% of range").pack(anchor=tk.W)
+        ttk.Label(self.rating_frame, text="Rating 2: Salary within specified range").pack(anchor=tk.W)
+        ttk.Label(self.rating_frame, text="Rating 3: Salary in bottom 10% of range").pack(anchor=tk.W)
+        
+        ttk.Separator(self.rating_frame, orient='horizontal').pack(fill=tk.X, pady=10)
+        
+        # Custom Percentages
+        percentages_frame = ttk.Frame(self.rating_frame)
+        percentages_frame.pack(fill=tk.X, pady=5)
+        
+        # Top Percentage
+        top_frame = ttk.Frame(percentages_frame)
+        top_frame.pack(fill=tk.X, pady=2)
+        ttk.Label(top_frame, text="Top Percentage for Rating 1:").pack(side=tk.LEFT)
+        self.top_percent_entry = ttk.Entry(top_frame, width=5)
+        self.top_percent_entry.pack(side=tk.LEFT, padx=5)
+        self.top_percent_entry.insert(0, "10")
+        ttk.Label(top_frame, text="%").pack(side=tk.LEFT)
+        
+        # Bottom Percentage
+        bottom_frame = ttk.Frame(percentages_frame)
+        bottom_frame.pack(fill=tk.X, pady=2)
+        ttk.Label(bottom_frame, text="Bottom Percentage for Rating 3:").pack(side=tk.LEFT)
+        self.bottom_percent_entry = ttk.Entry(bottom_frame, width=5)
+        self.bottom_percent_entry.pack(side=tk.LEFT, padx=5)
+        self.bottom_percent_entry.insert(0, "10")
+        ttk.Label(bottom_frame, text="%").pack(side=tk.LEFT)
 
         # Experience Requirement
-        self.experience_req_var = tk.BooleanVar()
+        self.experience_req_var = tk.BooleanVar(value=True)  
         self.experience_req_checkbox = ttk.Checkbutton(
-            rating_frame,
-            text="Require Specific Experience Level for High Rating",
+            self.rating_frame,
+            text="Must Match Selected Experience Level for High Rating",
             variable=self.experience_req_var
         )
-        self.experience_req_checkbox.pack()
+        self.experience_req_checkbox.pack(pady=5)
 
-        # Add other rating criteria as needed
+        self.rating_frame.pack(fill=tk.X, padx=5, pady=5)
 
     def toggle_advanced_settings(self):
         if self.advanced_var.get():
@@ -149,9 +182,11 @@ class JobScraperGUI:
 
     def toggle_location(self):
         if self.remote_var.get():
+            self.location_frame.pack_forget()
             self.location_entry.config(state='disabled')
             self.location_entry.delete(0, tk.END)
         else:
+            self.location_frame.pack(fill=tk.X, pady=5)
             self.location_entry.config(state='normal')
 
     def start_scraper(self):
@@ -166,6 +201,7 @@ class JobScraperGUI:
             resume = self.resume_entry.get().strip()
             remote_only = self.remote_var.get()
             location = None if remote_only else self.location_entry.get().strip()
+            include_no_salary = self.include_no_salary_var.get()
 
             # Get advanced settings
             distance = int(self.distance_entry.get()) if self.distance_entry.get() else None
@@ -179,7 +215,8 @@ class JobScraperGUI:
             )
 
             # Get rating settings
-            salary_threshold = int(self.salary_threshold_entry.get() or 0)
+            top_percent = float(self.top_percent_entry.get() or 10)
+            bottom_percent = float(self.bottom_percent_entry.get() or 10)
             require_experience = self.experience_req_var.get()
 
             # Create JobScraper instance and start scraping
@@ -193,13 +230,46 @@ class JobScraperGUI:
                 distance=distance,
                 experience_levels=experience_levels,
                 education_level=education_level,
-                salary_threshold=salary_threshold,
+                include_no_salary=include_no_salary,
+                top_percent=top_percent,
+                bottom_percent=bottom_percent,
                 require_experience=require_experience
             )
             scraper.scrape_indeed()
             messagebox.showinfo("Success", "Job scraping completed successfully!")
         except Exception as e:
             messagebox.showerror("Error", f"An error occurred: {str(e)}")
+
+    def get_job_summary(self, job):
+        """Format job details for display"""
+        details = []
+        
+        if job.get('title'):
+            details.append(f"<div class='job-title'>{job['title']}</div>")
+        
+        if job.get('company'):
+            details.append(f"<div class='company'>{job['company']}</div>")
+        
+        if job.get('salary_text'):
+            details.append(f"<div class='salary'>{job['salary_text']}</div>")
+        
+        if job.get('summary'):
+            # Clean and format the summary text
+            summary = job['summary'].replace('\n', ' ').strip()
+            # Replace <br> tags with non-breaking space
+            summary = summary.replace('<br>', '&nbsp;')
+            details.append(f"<div class='summary'>{summary}</div>")
+        
+        if job.get('rating'):
+            rating_text = {
+                1: "High Match",
+                2: "Medium Match",
+                3: "Low Match"
+            }.get(job['rating'], "Unknown")
+            details.append(f"<div class='rating'>Rating: {rating_text}</div>")
+        
+        # Join with newlines and spaces between tags
+        return "\n\n".join(details)
 
 if __name__ == '__main__':
     root = tk.Tk()

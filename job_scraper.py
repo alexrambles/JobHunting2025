@@ -16,7 +16,9 @@ import datetime
 class JobScraper:
     def __init__(self, keywords=None, job_title=None, salary_range=None, resume=None, 
                  remote_only=True, location=None, distance=None, 
-                 experience_levels=None, education_level=None):
+                 experience_levels=None, education_level=None,
+                 include_no_salary=True, top_percent=10, bottom_percent=10,
+                 require_experience=True):
         self.keywords = keywords or []
         self.job_title = job_title
         self.salary_range = salary_range
@@ -26,6 +28,11 @@ class JobScraper:
         self.distance = distance  # Distance in miles
         self.experience_levels = experience_levels or []
         self.education_level = education_level
+        self.include_no_salary = include_no_salary
+        # Rating parameters
+        self.top_percent = top_percent
+        self.bottom_percent = bottom_percent
+        self.require_experience = require_experience
         self.jobs = []
         self.user_agent = UserAgent()
         self.driver = None
@@ -108,18 +115,51 @@ class JobScraper:
         return None
 
     def rate_job(self, salary):
-        """Rate job based on salary range"""
+        """Rate job based on salary range and experience criteria"""
+        if not salary and not self.include_no_salary:
+            return None  # Job will be filtered out
+            
         if not salary:
-            return 2
-        if salary >= self.salary_range[0]:
-            return 1
-        if salary <= self.salary_range[1] * 1.1:
-            return 3
-        return 2
+            return 2  # Partial match for unspecified salary
+            
+        min_salary, max_salary = self.salary_range
+        salary_range = max_salary - min_salary
+        
+        # Calculate thresholds using specified percentages
+        top_threshold = max_salary - (salary_range * (self.top_percent / 100))
+        bottom_threshold = min_salary + (salary_range * (self.bottom_percent / 100))
+        
+        # Initial rating based on salary
+        if salary >= top_threshold:
+            rating = 1  # High rating
+        elif salary <= bottom_threshold:
+            rating = 3  # Low rating
+        else:
+            rating = 2  # Within normal range
+        
+        # Experience level criteria
+        if self.require_experience and self.experience_levels and rating == 1:
+            # Only check experience for jobs that would otherwise be rated 1
+            job_exp_match = any(level.lower() in str(self.jobs[-1].get('summary', '')).lower() 
+                              for level in self.experience_levels)
+            if not job_exp_match:
+                rating = 2  # Downgrade to partial match if experience doesn't match
+        
+        return rating
 
     def save_results(self):
         """Save job results to CSV file in Documents folder"""
         if not self.jobs:
+            return
+            
+        # Filter out jobs with no salary if include_no_salary is False
+        filtered_jobs = [
+            job for job in self.jobs 
+            if job.get('rating') is not None
+        ]
+        
+        if not filtered_jobs:
+            print("No jobs match the criteria after filtering")
             return
             
         # Get Documents folder path and create filename with current date
@@ -129,17 +169,17 @@ class JobScraper:
         filepath = os.path.join(documents_path, filename)
         
         # Create DataFrame and save to CSV
-        df = pd.DataFrame(self.jobs)
+        df = pd.DataFrame(filtered_jobs)
         df.to_csv(filepath, index=False)
-        print(f"\nSaved {len(self.jobs)} jobs to: {filepath}")
+        print(f"\nSaved {len(filtered_jobs)} jobs to: {filepath}")
         
         # Print job ratings summary
         ratings = df['rating'].value_counts().sort_index()
         for rating, count in ratings.items():
             rating_desc = {
-                1: "Match requirements",
-                2: "Partial match",
-                3: "Overqualified"
+                1: "Top tier salary" + (" & matching experience" if self.require_experience else ""),
+                2: "Within target range",
+                3: "Below target range"
             }.get(rating, "Unknown")
             print(f"Rating {rating} ({rating_desc}): {count}")
 
@@ -156,17 +196,24 @@ class JobScraper:
         
         # Get job description
         if job_desc := job_soup.find('div', {'id': 'jobDescriptionText'}):
-            summary = job_desc.get_text(strip=True)
+            # Split by double newlines to preserve paragraph structure
+            paragraphs = [p.strip() for p in job_desc.get_text().split('\n\n') if p.strip()]
+            # Join paragraphs with proper spacing
+            summary = ' '.join(p.replace('\n', ' ').strip() for p in paragraphs)
         else:
             # Try structured sections
             sections = ['Requirements', 'Responsibilities', 'Qualifications', 'Skills', "What You'll Do"]
+            section_texts = []
             for section in sections:
                 if header := job_soup.find(['h3', 'h4'], string=lambda s: s and section.lower() in s.lower()):
                     if section_div := header.find_next('div'):
-                        summary += f"{section}: {section_div.get_text(strip=True)}\n\n".replace('\n', ' ').replace('  ', ' ')
+                        section_text = section_div.get_text().strip()
+                        # Clean up internal spacing
+                        section_text = ' '.join(section_text.split())
+                        section_texts.append(f"{section}: {section_text}")
+            summary = ' '.join(section_texts)
         
         # Clean up text
-        summary = ' '.join(summary.split())
         summary = summary.encode('ascii', 'ignore').decode('ascii')
         if len(summary) > 1000:
             summary = summary[:997] + "..."
@@ -318,7 +365,11 @@ if __name__ == '__main__':
             remote_only=True,
             distance=50,
             experience_levels=["Mid Level"],
-            education_level="Bachelor's Degree"
+            education_level="Bachelor's Degree",
+            include_no_salary=True,
+            top_percent=10,
+            bottom_percent=10,
+            require_experience=True
         )
         scraper.scrape_indeed()
     except Exception as e:
