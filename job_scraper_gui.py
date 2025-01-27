@@ -1,25 +1,171 @@
 import tkinter as tk
 from tkinter import ttk, messagebox
 from job_scraper import JobScraper
+import time
+import undetected_chromedriver as uc
+from selenium import webdriver
+from selenium.webdriver.common.by import By
+from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support import expected_conditions as EC
+from selenium.common.exceptions import TimeoutException, NoSuchElementException
+import random
+import json
+import os
+from pathlib import Path
 
 class JobScraperGUI:
     def __init__(self, master):
         self.master = master
         master.title("Job Scraper Configuration")
         
+        # Settings file path
+        self.settings_file = os.path.join(str(Path.home()), '.job_scraper_settings.json')
+        
+        # Initialize scraper and driver
+        self.scraper = JobScraper()
+        self.driver = None
+        self.wait = None
+        
+        # Initialize variables
+        self.linkedin_email = ""
+        self.linkedin_password = ""
+        self.settings = {}
+        
+        # Create menu
+        self.menu = tk.Menu(master)
+        master.config(menu=self.menu)
+
+        # Add settings menu
+        self.settings_menu = tk.Menu(self.menu, tearoff=0)
+        self.menu.add_cascade(label="Settings", menu=self.settings_menu)
+        self.settings_menu.add_command(label="LinkedIn Login", command=self.open_linkedin_login_window)
+        
         # Create main frame
         self.main_frame = ttk.Frame(master, padding="10")
         self.main_frame.pack(fill=tk.BOTH, expand=True)
 
-        # Basic Settings
+        # Load saved settings
+        self.load_settings()
+
+        # Create all GUI elements
         self.create_basic_settings()
-        
-        # Advanced Settings
         self.create_advanced_settings()
+
+        # Apply saved settings after GUI elements are created
+        self.apply_saved_settings()
 
         # Submit Button
         self.submit_button = ttk.Button(self.main_frame, text="Start Scraper", command=self.start_scraper)
         self.submit_button.pack(pady=10)
+
+    def load_settings(self):
+        """Load settings from file"""
+        try:
+            if os.path.exists(self.settings_file):
+                with open(self.settings_file, 'r') as f:
+                    self.settings = json.load(f)
+                    self.linkedin_email = self.settings.get('linkedin_email', '')
+                    # Don't load password for security
+        except Exception as e:
+            print(f"Error loading settings: {str(e)}")
+            self.settings = {}
+
+    def save_settings(self):
+        """Save settings to file"""
+        try:
+            # Only save settings if GUI elements exist
+            settings = {
+                'linkedin_email': self.linkedin_email,
+            }
+            
+            # Add basic settings if they exist
+            if hasattr(self, 'keywords_entry'):
+                settings.update({
+                    'keywords': self.keywords_entry.get(),
+                    'job_title': self.job_title_entry.get(),
+                    'salary_min': self.salary_min_entry.get(),
+                    'salary_max': self.salary_max_entry.get(),
+                    'include_no_salary': self.include_no_salary_var.get(),
+                    'remote_only': self.remote_var.get(),
+                    'location': self.location_entry.get(),
+                })
+            
+            # Add advanced settings if they exist
+            if hasattr(self, 'distance_entry'):
+                settings.update({
+                    'distance': self.distance_entry.get(),
+                    'experience_levels': {level: var.get() for level, var in self.exp_vars.items()},
+                    'education_level': self.edu_var.get(),
+                    'top_percent': self.top_percent_entry.get(),
+                    'bottom_percent': self.bottom_percent_entry.get(),
+                    'require_experience': self.experience_req_var.get(),
+                })
+            
+            # Add website selections if they exist
+            if hasattr(self, 'website_vars'):
+                settings['selected_websites'] = {site: var.get() for site, var in self.website_vars.items()}
+            
+            with open(self.settings_file, 'w') as f:
+                json.dump(settings, f)
+        except Exception as e:
+            print(f"Error saving settings: {str(e)}")
+
+    def apply_saved_settings(self):
+        """Apply saved settings to GUI elements"""
+        if not hasattr(self, 'settings'):
+            return
+            
+        try:
+            # Apply basic settings
+            if hasattr(self, 'keywords_entry'):
+                if 'keywords' in self.settings:
+                    self.keywords_entry.delete(0, tk.END)
+                    self.keywords_entry.insert(0, self.settings.get('keywords', ''))
+                if 'job_title' in self.settings:
+                    self.job_title_entry.delete(0, tk.END)
+                    self.job_title_entry.insert(0, self.settings.get('job_title', ''))
+                if 'salary_min' in self.settings:
+                    self.salary_min_entry.delete(0, tk.END)
+                    self.salary_min_entry.insert(0, self.settings.get('salary_min', ''))
+                if 'salary_max' in self.settings:
+                    self.salary_max_entry.delete(0, tk.END)
+                    self.salary_max_entry.insert(0, self.settings.get('salary_max', ''))
+                if 'include_no_salary' in self.settings:
+                    self.include_no_salary_var.set(self.settings.get('include_no_salary', False))
+                if 'remote_only' in self.settings:
+                    self.remote_var.set(self.settings.get('remote_only', False))
+                if 'location' in self.settings:
+                    self.location_entry.delete(0, tk.END)
+                    self.location_entry.insert(0, self.settings.get('location', ''))
+            
+            # Apply advanced settings
+            if hasattr(self, 'distance_entry'):
+                if 'distance' in self.settings:
+                    self.distance_entry.delete(0, tk.END)
+                    self.distance_entry.insert(0, self.settings.get('distance', ''))
+                if 'experience_levels' in self.settings:
+                    for level, value in self.settings['experience_levels'].items():
+                        if level in self.exp_vars:
+                            self.exp_vars[level].set(value)
+                if 'education_level' in self.settings:
+                    self.edu_var.set(self.settings.get('education_level', ''))
+                if 'top_percent' in self.settings:
+                    self.top_percent_entry.delete(0, tk.END)
+                    self.top_percent_entry.insert(0, self.settings.get('top_percent', ''))
+                if 'bottom_percent' in self.settings:
+                    self.bottom_percent_entry.delete(0, tk.END)
+                    self.bottom_percent_entry.insert(0, self.settings.get('bottom_percent', ''))
+                if 'require_experience' in self.settings:
+                    self.experience_req_var.set(self.settings.get('require_experience', False))
+            
+            # Apply website selections
+            if hasattr(self, 'website_vars') and 'selected_websites' in self.settings:
+                for site, value in self.settings['selected_websites'].items():
+                    if site in self.website_vars:
+                        self.website_vars[site].set(value)
+                        
+        except Exception as e:
+            print(f"Error applying settings: {str(e)}")
 
     def create_basic_settings(self):
         # Basic settings frame
@@ -123,11 +269,27 @@ class JobScraperGUI:
         for level in education_levels:
             ttk.Radiobutton(edu_frame, text=level, variable=self.edu_var, value=level).pack(anchor=tk.W)
 
+        # Website Selection
+        self.create_website_selection()
+
         # Rating Settings
         self.create_rating_settings()
 
         # Initially hide advanced settings
         self.advanced_frame.pack_forget()
+
+    def create_website_selection(self):
+        # Website selection frame
+        website_frame = ttk.LabelFrame(self.advanced_frame, text="Select Websites", padding="5")
+        website_frame.pack(fill=tk.X, padx=5, pady=5)
+
+        self.website_vars = {
+            "Indeed": tk.BooleanVar(value=True),
+            "LinkedIn": tk.BooleanVar(value=False)
+        }
+
+        for site, var in self.website_vars.items():
+            ttk.Checkbutton(website_frame, text=site, variable=var).pack(anchor=tk.W)
 
     def create_rating_settings(self):
         # Rating Settings Frame
@@ -214,31 +376,51 @@ class JobScraperGUI:
                 else self.edu_var.get()
             )
 
+            # Get selected websites
+            selected_websites = [site for site, var in self.website_vars.items() if var.get()]
+
             # Get rating settings
             top_percent = float(self.top_percent_entry.get() or 10)
             bottom_percent = float(self.bottom_percent_entry.get() or 10)
             require_experience = self.experience_req_var.get()
 
-            # Create JobScraper instance and start scraping
-            scraper = JobScraper(
-                keywords=keywords,
-                job_title=job_title,
-                salary_range=salary_range,
-                resume=resume,
-                remote_only=remote_only,
-                location=location,
-                distance=distance,
-                experience_levels=experience_levels,
-                education_level=education_level,
-                include_no_salary=include_no_salary,
-                top_percent=top_percent,
-                bottom_percent=bottom_percent,
-                require_experience=require_experience
-            )
-            scraper.scrape_indeed()
+            # Check if LinkedIn credentials are provided if LinkedIn is selected
+            if "LinkedIn" in selected_websites:
+                if not self.linkedin_email or not self.linkedin_password:
+                    messagebox.showerror("Error", "Please enter LinkedIn credentials in Settings > LinkedIn Login")
+                    return
+                if not self.login_to_linkedin():
+                    return
+
+            # Initialize scraper parameters
+            self.scraper.keywords = keywords
+            self.scraper.job_title = job_title
+            self.scraper.salary_range = salary_range
+            self.scraper.resume = resume
+            self.scraper.remote_only = self.remote_var.get()
+            self.scraper.location = location
+            self.scraper.distance = distance
+            self.scraper.experience_levels = experience_levels
+            self.scraper.education_level = education_level
+            self.scraper.include_no_salary = self.include_no_salary_var.get()
+            self.scraper.top_percent = top_percent
+            self.scraper.bottom_percent = bottom_percent
+            self.scraper.require_experience = self.experience_req_var.get()
+            
+            # Share the driver instance if we're already logged in to LinkedIn
+            if self.driver and "LinkedIn" in selected_websites:
+                self.scraper.driver = self.driver
+                self.scraper.wait = self.wait
+            
+            self.scraper.scrape_jobs(selected_websites)
             messagebox.showinfo("Success", "Job scraping completed successfully!")
         except Exception as e:
             messagebox.showerror("Error", f"An error occurred: {str(e)}")
+        finally:
+            if self.driver:
+                self.driver.quit()
+                self.driver = None
+                self.wait = None
 
     def get_job_summary(self, job):
         """Format job details for display"""
@@ -270,6 +452,112 @@ class JobScraperGUI:
         
         # Join with newlines and spaces between tags
         return "\n\n".join(details)
+
+    def open_linkedin_login_window(self):
+        # Create a new window for LinkedIn login
+        login_window = tk.Toplevel(self.master)
+        login_window.title("LinkedIn Login")
+
+        # Email Entry
+        ttk.Label(login_window, text="Email:").pack(pady=5)
+        email_entry = ttk.Entry(login_window)
+        email_entry.pack(fill=tk.X, padx=10)
+        email_entry.insert(0, self.linkedin_email)  # Pre-fill saved email
+
+        # Password Entry
+        ttk.Label(login_window, text="Password:").pack(pady=5)
+        password_entry = ttk.Entry(login_window, show="*")
+        password_entry.pack(fill=tk.X, padx=10)
+
+        # Save Button
+        def save_credentials():
+            self.linkedin_email = email_entry.get()
+            self.linkedin_password = password_entry.get()
+            self.save_settings()
+            login_window.destroy()
+
+        ttk.Button(login_window, text="Save", command=save_credentials).pack(pady=10)
+
+    def setup_driver(self):
+        """Set up undetected ChromeDriver"""
+        try:
+            if self.driver:
+                try:
+                    self.driver.quit()
+                except:
+                    pass
+                self.driver = None
+                self.wait = None
+
+            options = uc.ChromeOptions()
+            options.add_argument('--window-size=1920,1080')
+            options.add_argument('--no-sandbox')
+            options.add_argument('--disable-dev-shm-usage')
+            options.add_argument('--disable-gpu')
+            options.add_argument('--disable-extensions')
+            
+            self.driver = uc.Chrome(options=options)
+            self.wait = WebDriverWait(self.driver, 10)
+            self.scraper.driver = self.driver
+            self.scraper.wait = self.wait
+            return self.driver
+        except Exception as e:
+            print(f"Error setting up ChromeDriver: {str(e)}")
+            raise
+
+    def handle_page_load(self, url, max_retries=3):
+        """Handle page load with retries"""
+        if not self.driver or not self.wait:
+            self.setup_driver()
+            
+        for attempt in range(max_retries):
+            try:
+                self.driver.get(url)
+                time.sleep(random.uniform(1, 2))
+                self.wait.until(EC.presence_of_element_located((By.TAG_NAME, "body")))
+                return True
+            except Exception as e:
+                print(f"Error loading page (attempt {attempt + 1}/{max_retries}): {str(e)}")
+                if attempt < max_retries - 1:
+                    time.sleep(random.uniform(1, 3))
+                else:
+                    return False
+
+    def login_to_linkedin(self):
+        try:
+            # Set up the driver if not already set up
+            if not self.driver or not self.wait:
+                self.setup_driver()
+            
+            # Load the login page
+            if not self.handle_page_load("https://www.linkedin.com/login"):
+                raise Exception("Failed to load LinkedIn login page")
+            
+            try:
+                # Wait for and find login elements
+                email_input = self.wait.until(EC.presence_of_element_located((By.ID, "username")))
+                password_input = self.wait.until(EC.presence_of_element_located((By.ID, "password")))
+                
+                # Enter credentials
+                email_input.send_keys(self.linkedin_email)
+                password_input.send_keys(self.linkedin_password)
+                password_input.submit()
+                
+                # Wait for login to complete
+                self.wait.until(EC.url_changes("https://www.linkedin.com/login"))
+                time.sleep(2)  # Additional wait for page to stabilize
+                
+                return True
+            except (TimeoutException, NoSuchElementException) as e:
+                raise Exception(f"Login elements not found: {str(e)}")
+                
+        except Exception as e:
+            messagebox.showerror("Login Error", f"Failed to log in to LinkedIn: {str(e)}")
+            if self.driver:
+                self.driver.quit()
+                self.driver = None
+                self.wait = None
+            return False
 
 if __name__ == '__main__':
     root = tk.Tk()
