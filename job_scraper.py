@@ -188,101 +188,119 @@ class JobScraper:
                     print(f"Within {self.distance} miles")
                 
             self.setup_driver()
-            
-            # Build the URL with advanced filters
-            base_url = "https://www.indeed.com/jobs"
-            params = {
-                'q': search_query,
-                'l': 'Remote' if self.remote_only else (self.location or ''),
-                'sc': '0kf:attr(DSQF7)' if self.remote_only else '',  # Remote jobs filter
-                'radius': self.distance if self.distance else '',  # Distance in miles
-                'vjk': 'all'
-            }
-
-            # Add experience level filters
-            if self.experience_levels:
-                exp_params = []
-                for level in self.experience_levels:
-                    if level == "Entry Level":
-                        exp_params.append("explvl(ENTRY_LEVEL)")
-                    elif level == "Mid Level":
-                        exp_params.append("explvl(MID_LEVEL)")
-                    elif level == "Senior Level":
-                        exp_params.append("explvl(SENIOR_LEVEL)")
-                if exp_params:
-                    params['sc'] = f"{params['sc']},{''.join(exp_params)}"
-
-            # Add education level filter
-            if self.education_level:
-                edu_param = ""
-                if self.education_level == "Bachelor's Degree":
-                    edu_param = "attr(FCGTU)|attr(HFDVW)"  # Indeed's parameter for Bachelor's
-                elif self.education_level == "Master's Degree":
-                    edu_param = "attr(FCGTU)|attr(HFDVW)|attr(QXQQS)"  # Include Master's
-                if edu_param:
-                    params['sc'] = f"{params['sc']},{edu_param}"
-
-            url = f"{base_url}?{urllib.parse.urlencode(params)}"
-            
-            if not self.handle_page_load(url):
-                return
-            
-            soup = BeautifulSoup(self.driver.page_source, 'html.parser')
-            job_cards = soup.find_all('div', {'class': ['job_seen_beacon', 'jobsearch-ResultsList', 'tapItem']})
-            print(f"\nFound {len(job_cards)} job cards")
-            
             processed_urls = set()
-            for job in job_cards:
-                try:
-                    # Get job URL and check for duplicates
-                    if not (job_link := job.find('a', {'class': ['jcs-JobTitle', 'jobTitle']}, href=True)):
+            page = 0
+            
+            while True:
+                # Build the URL with advanced filters and pagination
+                base_url = "https://www.indeed.com/jobs"
+                params = {
+                    'q': search_query,
+                    'l': 'Remote' if self.remote_only else (self.location or ''),
+                    'sc': '0kf:attr(DSQF7)' if self.remote_only else '',  # Remote jobs filter
+                    'radius': self.distance if self.distance else '',  # Distance in miles
+                    'start': page * 10,  # Indeed uses multiples of 10 for pagination
+                    'vjk': 'all'
+                }
+
+                # Add experience level filters
+                if self.experience_levels:
+                    exp_params = []
+                    for level in self.experience_levels:
+                        if level == "Entry Level":
+                            exp_params.append("explvl(ENTRY_LEVEL)")
+                        elif level == "Mid Level":
+                            exp_params.append("explvl(MID_LEVEL)")
+                        elif level == "Senior Level":
+                            exp_params.append("explvl(SENIOR_LEVEL)")
+                    if exp_params:
+                        params['sc'] = f"{params['sc']},{''.join(exp_params)}"
+
+                # Add education level filter
+                if self.education_level:
+                    edu_param = ""
+                    if self.education_level == "Bachelor's Degree":
+                        edu_param = "attr(FCGTU)|attr(HFDVW)"  # Indeed's parameter for Bachelor's
+                    elif self.education_level == "Master's Degree":
+                        edu_param = "attr(FCGTU)|attr(HFDVW)|attr(QXQQS)"  # Include Master's
+                    if edu_param:
+                        params['sc'] = f"{params['sc']},{edu_param}"
+
+                url = f"{base_url}?{urllib.parse.urlencode(params)}"
+                
+                if not self.handle_page_load(url):
+                    break
+                
+                soup = BeautifulSoup(self.driver.page_source, 'html.parser')
+                job_cards = soup.find_all('div', {'class': ['job_seen_beacon', 'jobsearch-ResultsList', 'tapItem']})
+                
+                if not job_cards:  # No more results
+                    break
+                    
+                if page == 0:  # Only print this for the first page
+                    print(f"\nFound {len(job_cards)} job cards on first page")
+                
+                new_jobs_found = False
+                for job in job_cards:
+                    try:
+                        # Get job URL and check for duplicates
+                        if not (job_link := job.find('a', {'class': ['jcs-JobTitle', 'jobTitle']}, href=True)):
+                            continue
+                        
+                        job_url = 'https://www.indeed.com' + job_link['href']
+                        if job_url in processed_urls:
+                            continue
+                        
+                        new_jobs_found = True
+                        processed_urls.add(job_url)
+                        
+                        # Get basic job info
+                        title = job_link.get_text(strip=True)
+                        company = "Company not found"
+                        if company_elem := job.find('span', {'data-testid': 'company-name'}):
+                            company = company_elem.get_text(strip=True).split(',')[0].strip()
+                            company = company.encode('ascii', 'ignore').decode('ascii')
+                        
+                        print(f"\nProcessing: {title} at {company}")
+                        
+                        # Get detailed job info
+                        self.driver.get(job_url)
+                        time.sleep(1)
+                        job_soup = BeautifulSoup(self.driver.page_source, 'html.parser')
+                        
+                        summary, salary_text = self.extract_job_details(job_soup)
+                        salary = self.extract_salary(salary_text)
+                        
+                        # Store job data
+                        self.jobs.append({
+                            'title': title,
+                            'company': company,
+                            'summary': summary[:500],
+                            'salary_text': salary_text or "Not specified",
+                            'salary_value': salary,
+                            'rating': self.rate_job(salary),
+                            'company_rating': None,  # Disabled for now
+                            'source': 'Indeed',
+                            'url': job_url
+                        })
+                        
+                        self.driver.back()
+                        time.sleep(1)
+                        
+                    except Exception as e:
+                        print(f"Error processing job: {str(e)}")
                         continue
+                
+                if not new_jobs_found:  # If no new jobs were found on this page
+                    break
                     
-                    job_url = 'https://www.indeed.com' + job_link['href']
-                    if job_url in processed_urls:
-                        print("Skipping duplicate")
-                        continue
-                    processed_urls.add(job_url)
-                    
-                    # Get basic job info
-                    title = job_link.get_text(strip=True)
-                    company = "Company not found"
-                    if company_elem := job.find('span', {'data-testid': 'company-name'}):
-                        company = company_elem.get_text(strip=True).split(',')[0].strip()
-                        company = company.encode('ascii', 'ignore').decode('ascii')
-                    
-                    print(f"\nProcessing: {title} at {company}")
-                    
-                    # Get detailed job info
-                    self.driver.get(job_url)
-                    time.sleep(1)
-                    job_soup = BeautifulSoup(self.driver.page_source, 'html.parser')
-                    
-                    summary, salary_text = self.extract_job_details(job_soup)
-                    salary = self.extract_salary(salary_text)
-                    
-                    # Store job data
-                    self.jobs.append({
-                        'title': title,
-                        'company': company,
-                        'summary': summary[:500],
-                        'salary_text': salary_text or "Not specified",
-                        'salary_value': salary,
-                        'rating': self.rate_job(salary),
-                        'company_rating': None,  # Disabled for now
-                        'source': 'Indeed',
-                        'url': job_url
-                    })
-                    
-                    self.driver.back()
-                    time.sleep(1)
-                    
-                except Exception as e:
-                    print(f"Error processing job: {str(e)}")
-                    continue
+                page += 1
+                if page >= 3:  # Limit to 3 pages (about 45 jobs) to avoid too many requests
+                    break
             
             print(f"\nProcessed {len(self.jobs)} jobs from Indeed")
             self.save_results()
+            
         finally:
             if self.driver:
                 try:
