@@ -18,12 +18,6 @@ import logging
 
 parser = argparse.ArgumentParser()
 parser.add_argument(
-    "--log", 
-    choices=['DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL'], 
-    default="INFO", 
-    help="Log level."
-)
-parser.add_argument(
     '-d', '--debug', 
     help="Print lots of debugging statements",
     action="store_const", 
@@ -32,12 +26,26 @@ parser.add_argument(
     default=logging.INFO
 )
 parser.add_argument(
+    "-o", "--output", 
+    action='store', 
+    nargs='?',
+    type=argparse.FileType('w'), 
+    dest='output',
+    help="Directs the output to a name of your choice"
+)
+parser.add_argument(
     '-v', '--verbose',
     help="Be verbose",
-    action="store_const", dest="loglevel", const=logging.DEBUG,
+    action="store_const", 
+    dest="loglevel", 
+    const=logging.DEBUG,
 )
 args = parser.parse_args()    
-logging.basicConfig(level=args.loglevel)
+logging.basicConfig(filename='logname.txt',
+                    filemode='a',
+                    format='%(asctime)s,%(msecs)03d %(name)s %(levelname)s %(message)s',
+                    datefmt='%Y-%m-%d %H:%M:%S',
+                    level= logging.INFO)
 
 class JobScraper:
     def __init__(self, keywords=None, job_title=None, salary_range=None, resume=None, 
@@ -67,23 +75,45 @@ class JobScraper:
         
     def setup_driver(self):
         """Set up undetected ChromeDriver"""
-        if self.driver and self.wait:
-            return self.driver
-            
         try:
             options = uc.ChromeOptions()
-            options.add_argument('--window-size=1920,1080')
-            options.add_argument('--no-sandbox')
-            options.add_argument('--disable-dev-shm-usage')
-            options.add_argument('--disable-gpu')
-            options.add_argument('--disable-extensions')
             
+            # Basic options for better stability
+            options.add_argument('--start-maximized')
+            options.add_argument('--disable-popup-blocking')
+            options.add_argument('--disable-notifications')
+            options.add_argument('--disable-dev-shm-usage')
+            options.add_argument('--no-sandbox')
+            
+            # Create driver with longer page load timeout
             self.driver = uc.Chrome(options=options)
+            self.driver.set_page_load_timeout(30)
             self.wait = WebDriverWait(self.driver, 10)
+            self._driver_shared = False
             return self.driver
         except Exception as e:
             print(f"Error setting up ChromeDriver: {str(e)}")
             raise
+
+    def cleanup_driver(self):
+        """Clean up the driver instance"""
+        if self.driver and not self._driver_shared:
+            try:
+                # Store window handles before quitting
+                handles = self.driver.window_handles
+                if handles:
+                    # Switch to main window and execute script to prevent auto-close
+                    self.driver.switch_to.window(handles[0])
+                    self.driver.execute_script("window.onbeforeunload = function() { return null; };")
+            except:
+                pass
+            finally:
+                try:
+                    self.driver.quit()
+                except:
+                    pass
+                self.driver = None
+                self.wait = None
 
     def handle_page_load(self, url, max_retries=3):
         """Handle page load with retries"""
@@ -110,32 +140,52 @@ class JobScraper:
             
         patterns = {
             'yearly': [
-                r'\$(\d{2,3}(?:,\d{3})*(?:\.\d{2})?)[K]?\s*-\s*\$?(\d{2,3}(?:,\d{3})*(?:\.\d{2})?)[K]?\s*(?:a year|annual|annually|/year|per year)',
-                r'\$(\d{2,3}(?:,\d{3})*(?:\.\d{2})?)[K]?\s*(?:a year|annual|annually|/year|per year)'
+                r'\$(\d{1,3}(?:,\d{3})*(?:\.\d{1,2})?)[K]?(?:/yr)?\s*-\s*\$?(\d{1,3}(?:,\d{3})*(?:\.\d{1,2})?)[K]?(?:/yr)?(?:\s*(?:a year|annual|annually|/year|per year|/yr|yr))?',
+                r'\$(\d{1,3}(?:,\d{3})*(?:\.\d{1,2})?)[K]?(?:\s*(?:a year|annual|annually|/year|per year|/yr|yr))'
             ],
             'hourly': [
-                r'\$(\d{2,3}(?:,\d{3})*(?:\.\d{2})?)\s*-\s*\$?(\d{2,3}(?:,\d{3})*(?:\.\d{2})?)\s*(?:an hour|/hour|per hour|hourly)',
-                r'\$(\d{2,3}(?:,\d{3})*(?:\.\d{2})?)\s*(?:an hour|/hour|per hour|hourly)'
+                r'\$(\d{1,3}(?:,\d{3})*(?:\.\d{1,2})?)[K]?(?:/hr)?\s*-\s*\$?(\d{1,3}(?:,\d{3})*(?:\.\d{1,2})?)[K]?(?:/hr)?(?:\s*(?:an hour|/hour|per hour|hourly|/hr|hr))?',
+                r'\$(\d{1,3}(?:,\d{3})*(?:\.\d{1,2})?)[K]?(?:\s*(?:an hour|/hour|per hour|hourly|/hr|hr))'
             ],
             'monthly': [
-                r'\$(\d{2,3}(?:,\d{3})*(?:\.\d{2})?)[K]?\s*-\s*\$?(\d{2,3}(?:,\d{3})*(?:\.\d{2})?)[K]?\s*(?:a month|monthly|/month|per month)',
-                r'\$(\d{2,3}(?:,\d{3})*(?:\.\d{2})?)[K]?\s*(?:a month|monthly|/month|per month)'
+                r'\$(\d{1,3}(?:,\d{3})*(?:\.\d{1,2})?)[K]?\s*-\s*\$?(\d{1,3}(?:,\d{3})*(?:\.\d{1,2})?)[K]?(?:\s*(?:a month|monthly|/month|per month))',
+                r'\$(\d{1,3}(?:,\d{3})*(?:\.\d{1,2})?)[K]?(?:\s*(?:a month|monthly|/month|per month))'
             ]
         }
         
+        text = text.replace('\n', ' ').strip()
+        logging.info(f'Extracting salary from: {text}')
+        
+        def convert_to_number(value_str):
+            """Helper function to convert salary string to number"""
+            if not value_str:
+                return None
+            # Remove commas and convert to float
+            num = float(value_str.replace(',', ''))
+            # If K is in the original text for this number, multiply by 1000
+            if 'K' in text[text.find(value_str)-1:text.find(value_str)+len(value_str)+1]:
+                num *= 1000
+            return num
+        
         for period, period_patterns in patterns.items():
             for pattern in period_patterns:
-                if matches := re.findall(pattern, text, re.IGNORECASE):
-                    values = []
-                    for match in matches[0] if isinstance(matches[0], tuple) else [matches[0]]:
-                        if match:
-                            clean_value = float(match.replace(',', '').replace('K', '000'))
-                            values.append(clean_value)
+                match = re.search(pattern, text, re.IGNORECASE)
+                if match:
+                    logging.info(f'Pattern matched: {pattern}')
+                    logging.info(f'Groups found: {match.groups()}')
+                    groups = match.groups()
                     
-                    if not values:
-                        continue
+                    # Convert first number
+                    salary1 = convert_to_number(groups[0])
                     
-                    salary = sum(values) / len(values)
+                    # Convert second number if it exists
+                    salary2 = convert_to_number(groups[1]) if len(groups) > 1 and groups[1] else None
+                    
+                    # Calculate final salary
+                    if salary2 is not None:
+                        salary = (salary1 + salary2) / 2  # Average of range
+                    else:
+                        salary = salary1  # Single value
                     
                     # Convert to yearly
                     if period == 'hourly':
@@ -143,7 +193,9 @@ class JobScraper:
                     elif period == 'monthly':
                         salary *= 12
                     
+                    logging.info(f'Extracted salary: {salary} from {text}')
                     return salary
+                    
         return None
 
     def rate_job(self, salary):
@@ -396,7 +448,131 @@ class JobScraper:
                 except:
                     pass
 
-    def scrape_linkedin(self):
+    def check_verification_status(self):
+        """Check if we're still on a verification page"""
+        try:
+            current_url = self.driver.current_url
+            return any(x in current_url.lower() for x in ['checkpoint', 'verification', 'challenge', 'login'])
+        except:
+            return True  # Assume we still need verification if we can't check
+
+    def wait_for_verification(self, timeout=600):  # 10 minutes total timeout
+        """Wait for user to complete verification manually"""
+        print("\nLinkedIn verification required!")
+        print("Please complete the verification in the browser window.")
+        print("The browser window will stay open until you complete verification.")
+        print("- After 5 minutes, you'll be asked if you want to close the window")
+        print("- After 10 minutes, the window will close automatically")
+        
+        start_time = time.time()
+        asked_to_close = False
+        
+        while time.time() - start_time < timeout:
+            if not self.check_verification_status():
+                print("\nVerification completed successfully!")
+                time.sleep(2)  # Wait for page to stabilize
+                return True
+                
+            # After 5 minutes, ask if user wants to close the window
+            elapsed_time = time.time() - start_time
+            if elapsed_time > 300 and not asked_to_close:  # 5 minutes
+                asked_to_close = True
+                print("\n5 minutes have passed. Checking if verification is still needed...")
+                
+                if self.check_verification_status():
+                    print("Still waiting for verification...")
+                    print(f"You have {int((timeout - elapsed_time)/60)} minutes before automatic closure")
+                    
+                    # Use GUI messagebox if available
+                    try:
+                        import tkinter.messagebox as messagebox
+                        if messagebox.askyesno("Verification Timeout", 
+                            "Would you like to close the browser window now?\n\n"
+                            "Select 'No' to continue waiting for verification."):
+                            return False
+                    except:
+                        # Fallback to console input if GUI not available
+                        response = input("\nWould you like to close the browser window? (y/n): ")
+                        if response.lower().startswith('y'):
+                            return False
+            
+            # Print remaining time every minute after 5 minutes
+            elif elapsed_time > 300 and int(elapsed_time) % 60 == 0:
+                remaining = int((timeout - elapsed_time)/60)
+                print(f"\n{remaining} minutes remaining before automatic closure")
+            
+            time.sleep(1)
+        
+        print("\nVerification timeout - closing browser window")
+        return False
+
+    def login_to_linkedin(self, email, password):
+        """Login to LinkedIn with provided credentials"""
+        try:
+            # Load the login page
+            if not self.handle_page_load("https://www.linkedin.com/login"):
+                raise Exception("Failed to load LinkedIn login page")
+            
+            try:
+                # Wait for and find login elements
+                email_input = self.wait.until(EC.presence_of_element_located((By.ID, "username")))
+                password_input = self.wait.until(EC.presence_of_element_located((By.ID, "password")))
+                
+                # Enter credentials
+                email_input.send_keys(email)
+                password_input.send_keys(password)
+                password_input.submit()
+                
+                # Wait a moment for the login request to process
+                time.sleep(3)
+                
+                # Check for verification requests
+                verification_selectors = [
+                    "//div[contains(@class, 'verification')]",
+                    "//div[contains(@class, 'checkpoint')]",
+                    "//div[contains(@class, 'challenge')]",
+                    "//input[contains(@aria-label, 'verification')]",
+                    "//input[contains(@aria-label, 'pin')]",
+                    "//div[contains(text(), 'verify')]",
+                    "//div[contains(text(), 'Verify')]",
+                    "//div[contains(text(), 'verification')]",
+                    "//div[contains(text(), 'Verification')]"
+                ]
+                
+                verification_needed = False
+                for selector in verification_selectors:
+                    try:
+                        if self.driver.find_element(By.XPATH, selector):
+                            verification_needed = True
+                            break
+                    except:
+                        continue
+                
+                if verification_needed or self.check_verification_status():
+                    print("\nVerification detected. Starting verification process...")
+                    if not self.wait_for_verification():
+                        raise Exception("Verification process incomplete")
+                
+                # Check if we're successfully logged in
+                if any(x in self.driver.current_url.lower() for x in ['feed', 'mynetwork', 'jobs']):
+                    print("Successfully logged in to LinkedIn")
+                    return True
+                elif self.check_verification_status():
+                    raise Exception("Login unsuccessful - still on login/verification page")
+                
+                # Additional wait for page to stabilize
+                time.sleep(2)
+                return True
+                
+            except Exception as e:
+                print(f"Error during LinkedIn login: {str(e)}")
+                return False
+                
+        except Exception as e:
+            print(f"Error accessing LinkedIn login page: {str(e)}")
+            return False
+
+    def scrape_linkedin(self, email=None, password=None):
         """
         Scrape job listings from LinkedIn.
         Scrapes 3 pages of results using URL-based pagination.
@@ -412,6 +588,14 @@ class JobScraper:
             # Only set up driver if not already provided
             if not self.driver or not self.wait:
                 self.setup_driver()
+            
+            # Login to LinkedIn if credentials provided
+            if email and password:
+                if not self.login_to_linkedin(email, password):
+                    raise Exception("Failed to login to LinkedIn")
+                print("Successfully logged in to LinkedIn")
+            else:
+                print("No LinkedIn credentials provided. Some job details may be limited.")
             
             # Format search query - combine job title and keywords if both present
             search_terms = []
@@ -429,14 +613,16 @@ class JobScraper:
             base_url = "https://www.linkedin.com/jobs/search"
             base_params = {
                 'keywords': search_query,
-                'f_AL': 'true',  # All filters
-                'sortBy': 'R'  # Sort by relevance
+                'position': '1',  # Start position
+                'pageNum': '0',   # Page number
+                'sortBy': 'R',    # Sort by relevance (R = Relevance, DD = Most recent)
+                'f_AL': 'false'   # Don't include all filters
             }
 
             # Add location parameters
             if self.remote_only:
                 base_params['f_WT'] = '2'  # Remote jobs
-                base_params['location'] = 'United States'  # Default to US for remote
+                base_params['geoId'] = '103644278'  # United States
             elif self.location:
                 base_params['location'] = self.location
                 if self.distance:
@@ -444,23 +630,46 @@ class JobScraper:
 
             # Add experience level filters if specified
             if self.experience_levels:
-                exp_params = []
+                exp_params = set()  # Use set to avoid duplicates
+                # Map GUI selections to LinkedIn experience levels
+                level_mapping = {
+                    'Entry level': ['1', '2'],     # Internship and Entry level
+                    'Mid level': ['3', '4'],       # Associate and Mid-Senior level
+                    'Senior level': ['5', '6']     # Director and Executive
+                }
+                
                 for level in self.experience_levels:
-                    if level.lower() == "entry level":
-                        exp_params.append("1")
-                    elif level.lower() == "mid level":
-                        exp_params.append("2")
-                    elif level.lower() == "senior level":
-                        exp_params.append("3")
+                    if level.lower() in [x.lower() for x in level_mapping.keys()]:
+                        # Add all corresponding LinkedIn levels
+                        exp_params.update(level_mapping[level])
+                
                 if exp_params:
-                    base_params['f_E'] = ','.join(exp_params)
+                    base_params['f_E'] = ','.join(sorted(exp_params))  # Sort for consistency
+
+            # Add education level if specified
+            if self.education_level:
+                edu_mapping = {
+                    "Bachelor's": '4',
+                    "Master's": '5',
+                    'Doctorate': '6'
+                }
+                if self.education_level in edu_mapping:
+                    base_params['f_ED'] = edu_mapping[self.education_level]
+
+            # Add salary range if specified
+            if self.salary_range and self.salary_range[0] > 0:
+                min_salary = self.salary_range[0]
+                if min_salary >= 40000:  # Only add if reasonable minimum
+                    base_params['f_SB2'] = f'{min_salary}'
+                if self.salary_range[1] > min_salary:
+                    base_params['f_SB3'] = f'{self.salary_range[1]}'
 
             # Debug log the parameters
-            logging.debug(f"LinkedIn search parameters: {base_params}")
+            logging.info(f"LinkedIn search parameters: {base_params}")
 
             # Scrape each page
             for page in range(pages_to_scrape):
-                logging.debug(f'Processing page {page + 1} of {pages_to_scrape}')
+                logging.info(f'Processing page {page + 1} of {pages_to_scrape}')
                 
                 # Add pagination parameter
                 params = base_params.copy()
@@ -468,7 +677,7 @@ class JobScraper:
                 
                 # Construct URL for this page
                 url = f"{base_url}?{urllib.parse.urlencode(params)}"
-                logging.debug(f'Built LinkedIn URL for page {page + 1}: {url}')
+                logging.info(f'Built LinkedIn URL for page {page + 1}: {url}')
                 
                 if not self.handle_page_load(url):
                     print(f"Failed to load LinkedIn jobs page {page + 1}")
@@ -487,7 +696,7 @@ class JobScraper:
                     # Try each possible container selector
                     for selector in container_selectors:
                         try:
-                            logging.debug(f'Searching for jobs container with selector: {selector}')
+                            logging.info(f'Searching for jobs container with selector: {selector}')
                             jobs_container = self.wait.until(
                                 EC.presence_of_element_located((By.CLASS_NAME, selector))
                             )
@@ -511,7 +720,7 @@ class JobScraper:
                     job_cards = self.driver.find_elements(By.CSS_SELECTOR, 
                         ".job-card-container, .jobs-search-results__list-item, .job-card-container--clickable"
                     )
-                    logging.debug(f'Found {len(job_cards)} job cards on page {page + 1}')
+                    logging.info(f'Found {len(job_cards)} job cards on page {page + 1}')
                     
                     if not job_cards:
                         print(f"No job cards found on page {page + 1}")
@@ -523,7 +732,7 @@ class JobScraper:
                     for job_card in job_cards:
                         try:
                             # Click the job card and wait for details to load
-                            logging.debug('Attempting to click job card')
+                            logging.info('Attempting to click job card')
                             try:
                                 job_card.click()
                             except:
@@ -531,7 +740,7 @@ class JobScraper:
                                 self.driver.execute_script("arguments[0].click();", job_card)
                             
                             # Wait for job details pane to load
-                            logging.debug('Waiting for job details to load')
+                            logging.info('Waiting for job details to load')
                             try:
                                 self.wait.until(EC.presence_of_element_located((
                                     By.CSS_SELECTOR, 
@@ -546,22 +755,23 @@ class JobScraper:
                             # Get current job URL and check if already processed
                             job_url = self.driver.current_url
                             if job_url in processed_urls:
-                                logging.debug(f'Skipping already processed job: {job_url}')
+                                logging.info(f'Skipping already processed job: {job_url}')
                                 continue
                             
                             processed_urls.add(job_url)
                             
                             # Extract job details
-                            logging.debug('Extracting job details')
+                            logging.info('Extracting job title')
                             title = job_card.find_element(By.CSS_SELECTOR, 
                                 ".job-card-list__title, .jobs-search-results__list-item-title, .job-card-list__title--link"
                             ).text.strip()
                             
+                            logging.info('Extracting job company')
                             company = job_card.find_element(By.CSS_SELECTOR,
                                 ".job-card-container__company-name, .job-card-container__primary-description, .artdeco-entity-lockup__caption"
                             ).text.strip()
                             
-                            logging.debug(f'Processing job: {title} at {company}')
+                            logging.info(f'Processing job: {title} at {company}')
                             
                             # Get job description
                             description = None
@@ -576,7 +786,9 @@ class JobScraper:
                                     description = self.wait.until(EC.presence_of_element_located((
                                         By.CSS_SELECTOR, selector
                                     )))
+                                    logging.info('Extracting job description')
                                     if description:
+                                        logging.info(f'Job description extracted-- {description}')
                                         break
                                 except:
                                     continue
@@ -590,23 +802,51 @@ class JobScraper:
                             # Try to find salary information
                             salary_text = None
                             salary_selectors = [
-                                "[class*='salary-range']",
-                                "[class*='compensation']",
-                                ".job-details-jobs-unified-top-card__job-insight"
+                                ".salary-range",
+                                ".compensation",
+                                ".job-details-jobs-unified-top-card__job-insight",
+                                "div[class*='job-details-preferences-and-skills__pill'][role*='presentation']",
                             ]
                             
                             for selector in salary_selectors:
                                 try:
+                                    logging.info(f'Attempting to find salary with selector: {selector}')
                                     salary_elem = self.driver.find_element(By.CSS_SELECTOR, selector)
                                     salary_text = salary_elem.text.strip()
-                                    if salary_text:
+                                    if salary_text and any(i.isdigit() for i in salary_text):
+                                        salary_text = salary_text.split('Matches your job preferences')[0].strip()
+                                        logging.info(f'Found salary: {salary_text}')
+                                        salary = self.extract_salary(salary_text)
                                         break
+                                    else:
+                                        salary_text = None
+                                        continue
+                                except:
+                                    continue
+
+                            if salary_text is None:
+                                logging.warning('Could not find salary. Attempting to use XPATH')
+                                try:
+                                    logging.info(f'Attempting to find salary with selector: {selector}')
+                                    salary_elem = self.driver.find_element_by_xpath('//div[contains(@class, "job-details-preferences-and-skills__pill") and (contains(text(), "yr") or contains(text(), "hr"))]')
+                                    salary_text = salary_elem.text.strip()
+                                    if salary_text:
+                                        logging.info(f'Found salary: {salary_text}')
+                                        salary = self.extract_salary(salary_text)
+                                        break
+                                        
+                                except NoSuchElementException:
+                                        logging.info(f'Attempting to find salary with selector: {selector}')
+                                        salary_elem = self.driver.find_element_by_xpath('//p[contains(text(), "Compensation Range") or contains(text(), "/yr") or contains(text(), "/hr") or contains(text(), "per year")]')
+                                        salary_text = salary_elem.text.strip()
+                                        if salary_text:
+                                            logging.info(f'Found salary: {salary_text}')
+                                            salary = self.extract_salary(salary_text)
+                                            break
                                 except:
                                     continue
                             
-                            salary = self.extract_salary(salary_text)
-                            
-                            logging.debug(f'Successfully extracted all job details')
+                            logging.info(f'Successfully extracted all job details.')
                             
                             # Store job data
                             self.jobs.append({
@@ -623,6 +863,7 @@ class JobScraper:
                             
                             total_jobs_found += 1
                             
+                            logging.info(f'Job {self.jobs[-1]["title"]} rated: {self.jobs[-1]["rating"]}')
                         except Exception as e:
                             logging.error(f"Error processing job: {str(e)}")
                             continue
@@ -647,10 +888,10 @@ class JobScraper:
             
         except Exception as e:
             print(f"Error in LinkedIn scraper: {str(e)}")
+            raise
         finally:
-            # Only quit the driver if we created it
-            if self.driver and not self._driver_shared:
-                self.driver.quit()
+            # Don't cleanup driver here - let the GUI handle it
+            pass
 
     def scrape_jobs(self, websites):
         """Scrape jobs from specified websites"""
@@ -663,25 +904,22 @@ class JobScraper:
         finally:
             # Clean up the driver if we haven't already and it's not shared
             if self.driver and not self._driver_shared:
-                try:
-                    self.driver.quit()
-                except:
-                    pass
-                self.driver = None
-                self.wait = None
+                self.cleanup_driver()
 
 if __name__ == '__main__':
     try:
         scraper = JobScraper(
-            keywords='business intelligence data analyst Tableau',
+            keywords='data analyst Tableau',
             job_title='Business Intelligence Developer',
-            salary_range=(90000, 120000),
+            salary_range=(80000, 120000),
             resume='path/to/resume',
             remote_only=True,
             include_no_salary=False,
             top_percent=10,
             bottom_percent=10
         )
-        scraper.scrape_indeed()
+        ## scraper.scrape_indeed()
+        scraper.scrape_linkedin(email="alexis@alexisrichard.com", password="blackie123") ## your_email, your_password
+            
     except Exception as e:
         print(f"Error: {str(e)}")
