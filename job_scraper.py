@@ -919,7 +919,7 @@ if __name__ == '__main__':
             bottom_percent=10
         )
         ## scraper.scrape_indeed()
-        scraper.scrape_linkedin(email="alexis@alexisrichard.com", password="blackie123") ## your_email, your_password
+        scraper.scrape_linkedin(email="your_email", password="your_password") ## your_email, your_password
             
     except Exception as e:
         print(f"Error: {str(e)}")
