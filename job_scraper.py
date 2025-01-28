@@ -238,7 +238,7 @@ class JobScraper:
         
         return rating
 
-    def save_results(self):
+    def save_results(self, source):
         """Save job results to CSV file in Documents folder"""
         if not self.jobs:
             return
@@ -258,7 +258,7 @@ class JobScraper:
         # Get Documents folder path and create filename with current date
         documents_path = os.path.expanduser('~/Documents')
         current_date = datetime.datetime.now().strftime('%Y-%m-%d')
-        filename = f'job_results_{current_date}.csv'
+        filename = f'job_results_{current_date}_{source}.csv'
         filepath = os.path.join(documents_path, filename)
         
         # Create DataFrame and save to CSV
@@ -439,7 +439,7 @@ class JobScraper:
                     break
             
             print(f"\nProcessed {len(self.jobs)} jobs from Indeed")
-            self.save_results()
+            self.save_results(source='Indeed')
             
         finally:
             if self.driver and not self._driver_shared:
@@ -771,7 +771,7 @@ class JobScraper:
                                 ".job-card-container__company-name, .job-card-container__primary-description, .artdeco-entity-lockup__caption"
                             ).text.strip()
                             
-                            logging.info(f'Processing job: {title} at {company}')
+                            print(f'Processing job: {title} at {company}')
                             
                             # Get job description
                             description = None
@@ -817,6 +817,7 @@ class JobScraper:
                                         salary_text = salary_text.split('Matches your job preferences')[0].strip()
                                         logging.info(f'Found salary: {salary_text}')
                                         salary = self.extract_salary(salary_text)
+                                        print(f'Found salary: {salary_text}')
                                         break
                                     else:
                                         salary_text = None
@@ -833,6 +834,7 @@ class JobScraper:
                                     if salary_text:
                                         logging.info(f'Found salary: {salary_text}')
                                         salary = self.extract_salary(salary_text)
+                                        print(f'Found salary: {salary_text}')
                                         break
                                         
                                 except NoSuchElementException:
@@ -842,6 +844,7 @@ class JobScraper:
                                         if salary_text:
                                             logging.info(f'Found salary: {salary_text}')
                                             salary = self.extract_salary(salary_text)
+                                            print(f'Found salary: {salary_text}')
                                             break
                                 except:
                                     continue
@@ -864,6 +867,7 @@ class JobScraper:
                             total_jobs_found += 1
                             
                             logging.info(f'Job {self.jobs[-1]["title"]} rated: {self.jobs[-1]["rating"]}')
+
                         except Exception as e:
                             logging.error(f"Error processing job: {str(e)}")
                             continue
@@ -881,7 +885,7 @@ class JobScraper:
             if self.jobs:
                 print(f"Saving {len(self.jobs)} jobs to CSV...")
                 try:
-                    self.save_results()
+                    self.save_results(source='LinkedIn')
                     print("Results saved successfully!")
                 except Exception as e:
                     print(f"Error saving results: {str(e)}")
@@ -893,14 +897,14 @@ class JobScraper:
             # Don't cleanup driver here - let the GUI handle it
             pass
 
-    def scrape_jobs(self, websites):
+    def scrape_jobs(self, websites, scraper):
         """Scrape jobs from specified websites"""
         try:
             for website in websites:
                 if website == 'LinkedIn':
-                    self.scrape_linkedin()
+                    scraper.scrape_linkedin(email="your_email", password="your_password") ## your_email, your_password
                 elif website == 'Indeed':
-                    self.scrape_indeed()
+                    scraper.scrape_indeed()
         finally:
             # Clean up the driver if we haven't already and it's not shared
             if self.driver and not self._driver_shared:
@@ -911,15 +915,15 @@ if __name__ == '__main__':
         scraper = JobScraper(
             keywords='data analyst Tableau',
             job_title='Business Intelligence Developer',
-            salary_range=(80000, 120000),
+            salary_range=(100000, 120000),
             resume='path/to/resume',
             remote_only=True,
             include_no_salary=False,
             top_percent=10,
             bottom_percent=10
         )
-        ## scraper.scrape_indeed()
-        scraper.scrape_linkedin(email="your_email", password="your_password") ## your_email, your_password
+        
+        scraper.scrape_jobs(['LinkedIn', 'Indeed'], scraper)
             
     except Exception as e:
         print(f"Error: {str(e)}")
