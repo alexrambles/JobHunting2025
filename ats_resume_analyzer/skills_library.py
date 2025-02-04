@@ -94,7 +94,10 @@ SOFT_SKILLS = {
         'Team Leadership', 'Project Management', 'Strategic Planning',
         'Decision Making', 'Change Management', 'Risk Management',
         'Stakeholder Management', 'Resource Planning', 'Team Building',
-        'Mentoring', 'Coaching', 'Performance Management'
+        'Mentoring', 'Coaching', 'Performance Management', 'Talent Development',
+        'Organizational Development', 'Executive Leadership', 'Vision Setting',
+        'Strategic Implementation', 'Cross-functional Leadership', 'Program Management',
+        'Department Leadership'
     ],
     
     # Communication
@@ -102,7 +105,10 @@ SOFT_SKILLS = {
         'Verbal Communication', 'Written Communication', 'Presentation Skills',
         'Technical Writing', 'Public Speaking', 'Client Communication',
         'Cross-functional Communication', 'Executive Communication',
-        'Documentation', 'Requirements Gathering', 'Status Reporting'
+        'Documentation', 'Requirements Gathering', 'Status Reporting',
+        'Business Writing', 'Email Communication', 'Active Listening',
+        'Negotiation Skills', 'Interpersonal Communication', 'Meeting Facilitation',
+        'Conflict Communication', 'Persuasive Communication', 'Professional Writing'
     ],
     
     # Problem Solving
@@ -110,7 +116,10 @@ SOFT_SKILLS = {
         'Analytical Thinking', 'Critical Thinking', 'Problem Analysis',
         'Root Cause Analysis', 'Troubleshooting', 'Decision Making',
         'Innovation', 'Creative Problem Solving', 'Systems Thinking',
-        'Process Improvement', 'Solution Design'
+        'Process Improvement', 'Solution Design', 'Logical Reasoning',
+        'Strategic Problem Solving', 'Design Thinking', 'Diagnostic Skills',
+        'Complex Problem Solving', 'Issue Resolution', 'Analytical Reasoning',
+        'Problem Prevention', 'Solution Architecture'
     ],
     
     # Collaboration
@@ -118,7 +127,12 @@ SOFT_SKILLS = {
         'Team Collaboration', 'Cross-functional Collaboration',
         'Stakeholder Engagement', 'Relationship Building',
         'Conflict Resolution', 'Team Building', 'Partnership Development',
-        'Knowledge Sharing', 'Mentoring', 'Peer Review'
+        'Knowledge Sharing', 'Mentoring', 'Peer Review',
+        'Virtual Collaboration', 'Global Team Collaboration',
+        'Cross-cultural Communication', 'Team Synergy',
+        'Collaborative Leadership', 'Group Facilitation',
+        'Interdepartmental Coordination', 'Community Building',
+        'Network Development', 'Alliance Building'
     ],
     
     # Business Acumen
@@ -126,7 +140,11 @@ SOFT_SKILLS = {
         'Business Analysis', 'Requirements Analysis', 'Process Optimization',
         'Strategic Thinking', 'Business Strategy', 'Industry Knowledge',
         'Market Analysis', 'Financial Analysis', 'Cost-Benefit Analysis',
-        'ROI Analysis', 'Budgeting', 'Forecasting'
+        'ROI Analysis', 'Budgeting', 'Forecasting',
+        'Business Development', 'Competitive Analysis', 'Business Planning',
+        'Business Process Management', 'Business Intelligence',
+        'Business Transformation', 'Business Case Development',
+        'Business Process Reengineering'
     ],
     
     # Project Management
@@ -134,7 +152,54 @@ SOFT_SKILLS = {
         'Agile Methodologies', 'Scrum', 'Kanban', 'Waterfall',
         'Sprint Planning', 'Release Management', 'Resource Allocation',
         'Timeline Management', 'Risk Assessment', 'Scope Management',
-        'Project Coordination', 'Milestone Tracking'
+        'Project Coordination', 'Milestone Tracking', 'Project Planning',
+        'Project Scheduling', 'Budget Management', 'Quality Management',
+        'Project Documentation', 'Stakeholder Management', 'Project Governance',
+        'Project Portfolio Management'
+    ],
+    
+    # Adaptability & Growth
+    'adaptability': [
+        'Change Adaptability', 'Learning Agility', 'Flexibility',
+        'Growth Mindset', 'Continuous Learning', 'Resilience',
+        'Stress Management', 'Emotional Intelligence', 'Self-awareness',
+        'Adaptable Thinking', 'Cultural Adaptability', 'Technology Adaptation',
+        'Crisis Management', 'Ambiguity Management', 'Time Management',
+        'Work-Life Balance', 'Professional Development', 'Career Growth',
+        'Self-motivation', 'Initiative'
+    ],
+    
+    # Customer Focus
+    'customer_focus': [
+        'Customer Service', 'Client Relations', 'Customer Experience',
+        'Customer Needs Analysis', 'Customer Success Management',
+        'Client Engagement', 'Customer Support', 'Client Management',
+        'Customer Satisfaction', 'User Experience', 'Client Success',
+        'Account Management', 'Customer Retention', 'Client Communication',
+        'Customer Journey Mapping', 'Service Excellence', 'Client Advisory',
+        'Customer Advocacy', 'Relationship Management', 'Client Development'
+    ],
+    
+    # Organization & Planning
+    'organization': [
+        'Strategic Planning', 'Organizational Skills', 'Time Management',
+        'Priority Setting', 'Resource Management', 'Goal Setting',
+        'Task Management', 'Calendar Management', 'Meeting Planning',
+        'Event Coordination', 'Process Organization', 'Documentation Management',
+        'Workflow Optimization', 'Schedule Management', 'Project Organization',
+        'System Organization', 'Information Management', 'Resource Coordination',
+        'Program Planning', 'Operations Planning'
+    ],
+    
+    # Quality & Detail
+    'quality_focus': [
+        'Quality Assurance', 'Attention to Detail', 'Quality Control',
+        'Process Quality', 'Documentation Quality', 'Standards Compliance',
+        'Accuracy', 'Precision', 'Detail Orientation', 'Review Process',
+        'Quality Management', 'Quality Metrics', 'Performance Standards',
+        'Quality Improvement', 'Best Practices', 'Standard Operating Procedures',
+        'Quality Monitoring', 'Quality Reporting', 'Compliance Management',
+        'Quality Auditing'
     ]
 }
 
