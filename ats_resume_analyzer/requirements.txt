@@ -1,3 +1,7 @@
 python-docx==0.8.11
 PyPDF2==3.0.1
+pdfminer.six==20221105
+docx2txt==0.8
 nltk==3.8.1
+requests==2.31.0
+beautifulsoup4==4.12.2
