@@ -238,44 +238,6 @@ class JobScraper:
         
         return rating
 
-    def save_results(self, source):
-        """Save job results to CSV file in Documents folder"""
-        if not self.jobs:
-            return
-            
-        # Filter out jobs with no salary if include_no_salary is False
-        # Also filter out jobs that were rated as None (below bottom buffer)
-        filtered_jobs = [
-            job for job in self.jobs 
-            if (job.get('rating') is not None and # Rating is not None
-                (self.include_no_salary or job.get('salary_value') is not None))  # Has salary if required
-        ]
-        
-        if not filtered_jobs:
-            print("No jobs match the criteria after filtering")
-            return
-            
-        # Get Documents folder path and create filename with current date
-        documents_path = os.path.expanduser('~/Documents')
-        current_date = datetime.datetime.now().strftime('%Y-%m-%d')
-        filename = f'job_results_{current_date}_{source}.csv'
-        filepath = os.path.join(documents_path, filename)
-        
-        # Create DataFrame and save to CSV
-        df = pd.DataFrame(filtered_jobs)
-        df.to_csv(filepath, index=False)
-        print(f"\nSaved {len(filtered_jobs)} jobs to: {filepath}")
-        
-        # Print job ratings summary
-        ratings = df['rating'].value_counts().sort_index()
-        for rating, count in ratings.items():
-            rating_desc = {
-                1: "Top tier salary" + (" & matching experience" if self.require_experience else ""),
-                2: "Within target range",
-                3: "Below target range"
-            }.get(rating, "Unknown")
-            print(f"Rating {rating} ({rating_desc}): {count}")
-
     def extract_job_details(self, job_soup):
         """Extract job details from soup"""
         summary = ""
@@ -439,7 +401,6 @@ class JobScraper:
                     break
             
             print(f"\nProcessed {len(self.jobs)} jobs from Indeed")
-            self.save_results(source='Indeed')
             
         finally:
             if self.driver and not self._driver_shared:
@@ -447,6 +408,8 @@ class JobScraper:
                     self.driver.quit()
                 except:
                     pass
+
+        return self.jobs
 
     def check_verification_status(self):
         """Check if we're still on a verification page"""
@@ -882,14 +845,6 @@ class JobScraper:
             # After processing all pages, save results
             print(f"\nLinkedIn scraping completed. Found {total_jobs_found} jobs across {pages_to_scrape} pages.")
             
-            if self.jobs:
-                print(f"Saving {len(self.jobs)} jobs to CSV...")
-                try:
-                    self.save_results(source='LinkedIn')
-                    print("Results saved successfully!")
-                except Exception as e:
-                    print(f"Error saving results: {str(e)}")
-            
         except Exception as e:
             print(f"Error in LinkedIn scraper: {str(e)}")
             raise
@@ -897,14 +852,93 @@ class JobScraper:
             # Don't cleanup driver here - let the GUI handle it
             pass
 
-    def scrape_jobs(self, websites):
-        """Scrape jobs from specified websites"""
+    def scrape_jobs(self, websites, linkedin_email=None, linkedin_password=None):
+        """
+        Scrape jobs from specified websites
+        
+        Args:
+            websites (list): List of websites to scrape from ('LinkedIn', 'Indeed')
+            linkedin_email (str, optional): LinkedIn login email
+            linkedin_password (str, optional): LinkedIn login password
+        """
+        self.jobs = []  # Reset jobs list
+        platforms_used = []
+        
         try:
             for website in websites:
+                print(f"\nScraping jobs from {website}...")
                 if website == 'LinkedIn':
-                    self.scrape_linkedin(email="your_email", password="your_password") ## your_email, your_password
+                    if linkedin_email and linkedin_password:
+                        print("Using provided LinkedIn credentials...")
+                        jobs = self.scrape_linkedin(email=linkedin_email, password=linkedin_password)
+                    else:
+                        print("No LinkedIn credentials provided. Some job details may be limited.")
+                        jobs = self.scrape_linkedin()
+                    
+                    if jobs:
+                        print(f"Found {len(jobs)} jobs from LinkedIn")
+                        self.jobs.extend(jobs)
+                        platforms_used.append('LinkedIn')
+                    else:
+                        print("No jobs found from LinkedIn")
+                        
                 elif website == 'Indeed':
-                    self.scrape_indeed()
+                    jobs = self.scrape_indeed()
+                    if jobs:
+                        print(f"Found {len(jobs)} jobs from Indeed")
+                        self.jobs.extend(jobs)
+                        platforms_used.append('Indeed')
+                    else:
+                        print("No jobs found from Indeed")
+            
+            print(f"\nTotal jobs found across all platforms: {len(self.jobs)}")
+            
+            # Save all jobs to CSV if any were found
+            if self.jobs:
+                # Get Documents folder path and create filename with current date and platforms
+                documents_path = os.path.expanduser('~/Documents')
+                current_date = datetime.datetime.now().strftime('%Y-%m-%d')
+                platforms_str = '_'.join(platforms_used)
+                filename = f'job_results_{platforms_str}_{current_date}.csv'
+                filepath = os.path.join(documents_path, filename)
+                
+                print("\nFiltering jobs based on criteria...")
+                # Filter jobs based on criteria
+                filtered_jobs = [
+                    job for job in self.jobs 
+                    if (job.get('rating') is not None and  # Rating is not None
+                        (self.include_no_salary or job.get('salary_value') is not None))  # Has salary if required
+                ]
+                
+                print(f"Jobs after filtering: {len(filtered_jobs)}")
+                
+                if filtered_jobs:
+                    # Create DataFrame and save to CSV
+                    df = pd.DataFrame(filtered_jobs)
+                    print("\nSaving to CSV...")
+                    print(f"File path: {filepath}")
+                    df.to_csv(filepath, index=False)
+                    print(f"Successfully saved {len(filtered_jobs)} jobs to: {filepath}")
+                    
+                    # Print job ratings summary
+                    ratings = df['rating'].value_counts().sort_index()
+                    print("\nJob Ratings Summary:")
+                    for rating, count in ratings.items():
+                        rating_desc = {
+                            1: "Top tier salary" + (" & matching experience" if self.require_experience else ""),
+                            2: "Within target range",
+                            3: "Below target range"
+                        }.get(rating, "Unknown")
+                        print(f"Rating {rating} ({rating_desc}): {count} jobs")
+                else:
+                    print("\nNo jobs matched the filtering criteria")
+                    print("Jobs were found but were filtered out due to:")
+                    print("- Jobs without ratings")
+                    if not self.include_no_salary:
+                        print("- Jobs without salary information")
+            else:
+                print("\nNo jobs were found from any platform")
+                
         finally:
             # Clean up the driver if we haven't already and it's not shared
             if self.driver and not self._driver_shared:
@@ -913,7 +947,7 @@ class JobScraper:
 if __name__ == '__main__':
     try:
         scraper = JobScraper(
-            keywords='data analyst Tableau',
+            keywords='business intelligence Tableau',
             job_title='Business Intelligence Developer',
             salary_range=(100000, 120000),
             resume='path/to/resume',
@@ -923,7 +957,12 @@ if __name__ == '__main__':
             bottom_percent=10
         )
         
-        scraper.scrape_jobs(['LinkedIn', 'Indeed'])
+        # Example usage with LinkedIn credentials
+        scraper.scrape_jobs(
+            websites=['LinkedIn', 'Indeed'],
+            linkedin_email='your_email@example.com',  # Optional
+            linkedin_password='your_password'         # Optional
+        )
             
     except Exception as e:
         print(f"Error: {str(e)}")
