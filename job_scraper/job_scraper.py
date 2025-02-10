@@ -12,6 +12,7 @@ from selenium.common.exceptions import TimeoutException, NoSuchElementException
 from bs4 import BeautifulSoup
 import os
 import datetime
+import atexit
 
 import argparse
 import logging
@@ -72,48 +73,151 @@ class JobScraper:
         self.driver = None
         self.wait = None
         self._driver_shared = False
-        
-    def setup_driver(self):
-        """Set up undetected ChromeDriver"""
+        self._cleanup_lock = False
+        self._is_cleaned_up = False
+        self._driver_pid = None
+
+    def __del__(self):
+        """Ensure driver is cleaned up when object is deleted, but only if not already cleaned up"""
+        if not self._is_cleaned_up:
+            self.cleanup_driver()
+
+    def _is_driver_running(self):
+        """Check if the Chrome process is still running"""
+        if not self._driver_pid:
+            return False
         try:
-            options = uc.ChromeOptions()
+            import psutil
+            return psutil.pid_exists(self._driver_pid)
+        except (ImportError, Exception):
+            return True  # Assume it's running if we can't check
+
+    def _safe_execute_script(self, script):
+        """Safely execute a script, handling any potential errors"""
+        try:
+            return self.driver.execute_script(script)
+        except Exception:
+            return None
+
+    def _safe_close_windows(self):
+        """Safely close all browser windows"""
+        try:
+            # Try to get window handles
+            try:
+                handles = self.driver.window_handles
+            except Exception:
+                handles = []
+
+            # If we have handles, try to close each window
+            for handle in handles:
+                try:
+                    self.driver.switch_to.window(handle)
+                    self._safe_execute_script("window.onbeforeunload = null;")
+                    self.driver.close()
+                except Exception:
+                    continue
+        except Exception:
+            pass
+
+    def _terminate_chrome_process(self):
+        """Forcefully terminate the Chrome process if it's still running"""
+        if self._driver_pid:
+            try:
+                import psutil
+                process = psutil.Process(self._driver_pid)
+                if process.is_running():
+                    process.terminate()
+                    process.wait(timeout=3)  # Wait for process to terminate
+            except (ImportError, psutil.NoSuchProcess, psutil.TimeoutExpired, Exception):
+                pass
+
+    def cleanup_driver(self):
+        """Clean up the driver instance with enhanced error handling"""
+        if self._cleanup_lock or self._is_cleaned_up:
+            return
             
-            # Basic options for better stability
+        self._cleanup_lock = True
+        try:
+            if self.driver and not self._driver_shared:
+                # Only attempt cleanup if the driver process is still running
+                if self._is_driver_running():
+                    try:
+                        # Try to disable beforeunload event
+                        self._safe_execute_script("window.onbeforeunload = null;")
+                        
+                        # Safely close all windows
+                        self._safe_close_windows()
+                        
+                        # Attempt to quit the driver
+                        try:
+                            self.driver.quit()
+                        except Exception as e:
+                            if "invalid session id" not in str(e).lower() and "no such session" not in str(e).lower():
+                                print(f"Warning: Error during driver quit: {str(e)}")
+                                
+                        # Force terminate the process if it's still running
+                        self._terminate_chrome_process()
+                        
+                    except Exception as e:
+                        print(f"Warning: Error during cleanup: {str(e)}")
+                        # Still try to terminate the process
+                        self._terminate_chrome_process()
+                
+                # Clear the driver reference regardless of cleanup success
+                self.driver = None
+                self.wait = None
+                self._driver_pid = None
+                self._is_cleaned_up = True
+        finally:
+            self._cleanup_lock = False
+
+    def setup_driver(self):
+        """Set up undetected ChromeDriver with enhanced process tracking"""
+        try:
+            if self.driver:
+                self.cleanup_driver()
+                
+            options = uc.ChromeOptions()
             options.add_argument('--start-maximized')
             options.add_argument('--disable-popup-blocking')
             options.add_argument('--disable-notifications')
             options.add_argument('--disable-dev-shm-usage')
             options.add_argument('--no-sandbox')
+            # Add arguments to help with cleanup
+            options.add_argument('--disable-background-networking')
+            options.add_argument('--disable-background-timer-throttling')
+            options.add_argument('--disable-backgrounding-occluded-windows')
+            options.add_argument('--disable-breakpad')
+            options.add_argument('--disable-component-extensions-with-background-pages')
+            options.add_argument('--disable-extensions')
+            options.add_argument('--disable-features=TranslateUI')
+            options.add_argument('--disable-ipc-flooding-protection')
+            options.add_argument('--disable-renderer-backgrounding')
+            options.add_argument('--enable-features=NetworkService,NetworkServiceInProcess')
+            options.add_argument('--force-color-profile=srgb')
+            options.add_argument('--metrics-recording-only')
+            options.add_argument('--no-first-run')
             
-            # Create driver with longer page load timeout
             self.driver = uc.Chrome(options=options)
+            
+            # Store the process ID for later cleanup
+            try:
+                self._driver_pid = self.driver.service.process.pid
+            except Exception:
+                try:
+                    # Fallback to getting PID from service directly
+                    self._driver_pid = self.driver.service.process.pid if self.driver.service.process else None
+                except Exception:
+                    self._driver_pid = None
+                
             self.driver.set_page_load_timeout(30)
             self.wait = WebDriverWait(self.driver, 10)
             self._driver_shared = False
+            self._is_cleaned_up = False
             return self.driver
         except Exception as e:
             print(f"Error setting up ChromeDriver: {str(e)}")
             raise
-
-    def cleanup_driver(self):
-        """Clean up the driver instance"""
-        if self.driver and not self._driver_shared:
-            try:
-                # Store window handles before quitting
-                handles = self.driver.window_handles
-                if handles:
-                    # Switch to main window and execute script to prevent auto-close
-                    self.driver.switch_to.window(handles[0])
-                    self.driver.execute_script("window.onbeforeunload = function() { return null; };")
-            except:
-                pass
-            finally:
-                try:
-                    self.driver.quit()
-                except:
-                    pass
-                self.driver = None
-                self.wait = None
 
     def handle_page_load(self, url, max_retries=3):
         """Handle page load with retries"""
@@ -237,6 +341,44 @@ class JobScraper:
                 rating = 2  # Downgrade to partial match if experience doesn't match
         
         return rating
+
+    def save_results(self, source):
+        """Save job results to CSV file in Documents folder"""
+        if not self.jobs:
+            return
+            
+        # Filter out jobs with no salary if include_no_salary is False
+        # Also filter out jobs that were rated as None (below bottom buffer)
+        filtered_jobs = [
+            job for job in self.jobs 
+            if (job.get('rating') is not None and # Rating is not None
+                (self.include_no_salary or job.get('salary_value') is not None))  # Has salary if required
+        ]
+        
+        if not filtered_jobs:
+            print("No jobs match the criteria after filtering")
+            return
+            
+        # Get Documents folder path and create filename with current date
+        documents_path = os.path.expanduser('~/Documents')
+        current_date = datetime.datetime.now().strftime('%Y-%m-%d')
+        filename = f'job_results_{current_date}_{source}.csv'
+        filepath = os.path.join(documents_path, filename)
+        
+        # Create DataFrame and save to CSV
+        df = pd.DataFrame(filtered_jobs)
+        df.to_csv(filepath, index=False)
+        print(f"\nSaved {len(filtered_jobs)} jobs to: {filepath}")
+        
+        # Print job ratings summary
+        ratings = df['rating'].value_counts().sort_index()
+        for rating, count in ratings.items():
+            rating_desc = {
+                1: "Top tier salary" + (" & matching experience" if self.require_experience else ""),
+                2: "Within target range",
+                3: "Below target range"
+            }.get(rating, "Unknown")
+            print(f"Rating {rating} ({rating_desc}): {count}")
 
     def extract_job_details(self, job_soup):
         """Extract job details from soup"""
@@ -401,6 +543,7 @@ class JobScraper:
                     break
             
             print(f"\nProcessed {len(self.jobs)} jobs from Indeed")
+            self.save_results(source='Indeed')
             
         finally:
             if self.driver and not self._driver_shared:
@@ -408,8 +551,6 @@ class JobScraper:
                     self.driver.quit()
                 except:
                     pass
-
-        return self.jobs
 
     def check_verification_status(self):
         """Check if we're still on a verification page"""
@@ -845,6 +986,14 @@ class JobScraper:
             # After processing all pages, save results
             print(f"\nLinkedIn scraping completed. Found {total_jobs_found} jobs across {pages_to_scrape} pages.")
             
+            if self.jobs:
+                print(f"Saving {len(self.jobs)} jobs to CSV...")
+                try:
+                    self.save_results(source='LinkedIn')
+                    print("Results saved successfully!")
+                except Exception as e:
+                    print(f"Error saving results: {str(e)}")
+            
         except Exception as e:
             print(f"Error in LinkedIn scraper: {str(e)}")
             raise
@@ -852,117 +1001,49 @@ class JobScraper:
             # Don't cleanup driver here - let the GUI handle it
             pass
 
-    def scrape_jobs(self, websites, linkedin_email=None, linkedin_password=None):
-        """
-        Scrape jobs from specified websites
-        
-        Args:
-            websites (list): List of websites to scrape from ('LinkedIn', 'Indeed')
-            linkedin_email (str, optional): LinkedIn login email
-            linkedin_password (str, optional): LinkedIn login password
-        """
-        self.jobs = []  # Reset jobs list
-        platforms_used = []
-        
+    def scrape_jobs(self, websites, scraper):
+        """Scrape jobs from specified websites"""
         try:
             for website in websites:
-                print(f"\nScraping jobs from {website}...")
                 if website == 'LinkedIn':
-                    if linkedin_email and linkedin_password:
-                        print("Using provided LinkedIn credentials...")
-                        jobs = self.scrape_linkedin(email=linkedin_email, password=linkedin_password)
-                    else:
-                        print("No LinkedIn credentials provided. Some job details may be limited.")
-                        jobs = self.scrape_linkedin()
-                    
-                    if jobs:
-                        print(f"Found {len(jobs)} jobs from LinkedIn")
-                        self.jobs.extend(jobs)
-                        platforms_used.append('LinkedIn')
-                    else:
-                        print("No jobs found from LinkedIn")
-                        
+                    scraper.scrape_linkedin(email="your_email", password="your_password") ## your_email, your_password
                 elif website == 'Indeed':
-                    jobs = self.scrape_indeed()
-                    if jobs:
-                        print(f"Found {len(jobs)} jobs from Indeed")
-                        self.jobs.extend(jobs)
-                        platforms_used.append('Indeed')
-                    else:
-                        print("No jobs found from Indeed")
-            
-            print(f"\nTotal jobs found across all platforms: {len(self.jobs)}")
-            
-            # Save all jobs to CSV if any were found
-            if self.jobs:
-                # Get Documents folder path and create filename with current date and platforms
-                documents_path = os.path.expanduser('~/Documents')
-                current_date = datetime.datetime.now().strftime('%Y-%m-%d')
-                platforms_str = '_'.join(platforms_used)
-                filename = f'job_results_{platforms_str}_{current_date}.csv'
-                filepath = os.path.join(documents_path, filename)
-                
-                print("\nFiltering jobs based on criteria...")
-                # Filter jobs based on criteria
-                filtered_jobs = [
-                    job for job in self.jobs 
-                    if (job.get('rating') is not None and  # Rating is not None
-                        (self.include_no_salary or job.get('salary_value') is not None))  # Has salary if required
-                ]
-                
-                print(f"Jobs after filtering: {len(filtered_jobs)}")
-                
-                if filtered_jobs:
-                    # Create DataFrame and save to CSV
-                    df = pd.DataFrame(filtered_jobs)
-                    print("\nSaving to CSV...")
-                    print(f"File path: {filepath}")
-                    df.to_csv(filepath, index=False)
-                    print(f"Successfully saved {len(filtered_jobs)} jobs to: {filepath}")
-                    
-                    # Print job ratings summary
-                    ratings = df['rating'].value_counts().sort_index()
-                    print("\nJob Ratings Summary:")
-                    for rating, count in ratings.items():
-                        rating_desc = {
-                            1: "Top tier salary" + (" & matching experience" if self.require_experience else ""),
-                            2: "Within target range",
-                            3: "Below target range"
-                        }.get(rating, "Unknown")
-                        print(f"Rating {rating} ({rating_desc}): {count} jobs")
-                else:
-                    print("\nNo jobs matched the filtering criteria")
-                    print("Jobs were found but were filtered out due to:")
-                    print("- Jobs without ratings")
-                    if not self.include_no_salary:
-                        print("- Jobs without salary information")
-            else:
-                print("\nNo jobs were found from any platform")
-                
+                    scraper.scrape_indeed()
         finally:
             # Clean up the driver if we haven't already and it's not shared
-            if self.driver and not self._driver_shared:
-                self.cleanup_driver()
+            if scraper.driver and not scraper._driver_shared:
+                scraper.cleanup_driver()
 
 if __name__ == '__main__':
+    import psutil
+    scraper = None
+    
+    def cleanup_at_exit():
+        global scraper
+        if scraper and not scraper._is_cleaned_up:
+            scraper.cleanup_driver()
+    
+    # Register cleanup function to run at program exit
+    atexit.register(cleanup_at_exit)
+    
     try:
         scraper = JobScraper(
-            keywords='business intelligence Tableau',
+            keywords='data analyst Tableau',
             job_title='Business Intelligence Developer',
             salary_range=(100000, 120000),
             resume='path/to/resume',
             remote_only=True,
-            include_no_salary=False,
             top_percent=10,
             bottom_percent=10
         )
         
-        # Example usage with LinkedIn credentials
-        scraper.scrape_jobs(
-            websites=['LinkedIn', 'Indeed'],
-            linkedin_email='your_email@example.com',  # Optional
-            linkedin_password='your_password'         # Optional
-        )
+        scraper.scrape_jobs(['LinkedIn', 'Indeed'], scraper)
             
     except Exception as e:
         print(f"Error: {str(e)}")
+    finally:
+        if scraper:
+            # Ensure immediate cleanup
+            scraper.cleanup_driver()
+            # Unregister the atexit handler since we've already cleaned up
+            atexit.unregister(cleanup_at_exit)

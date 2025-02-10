@@ -18,6 +18,9 @@ class JobScraperGUI:
         self.master = master
         master.title("Job Scraper Configuration")
         
+        # Bind window closing event
+        master.protocol("WM_DELETE_WINDOW", self.on_closing)
+        
         # Settings file path
         self.settings_file = os.path.join(str(Path.home()), '.job_scraper_settings.json')
         
@@ -418,7 +421,7 @@ class JobScraperGUI:
             messagebox.showerror("Error", f"An error occurred: {str(e)}")
         finally:
             if self.driver:
-                self.driver.quit()
+                self.cleanup_driver()
                 self.driver = None
                 self.wait = None
 
@@ -559,7 +562,64 @@ class JobScraperGUI:
                 self.wait = None
             return False
 
+    def cleanup_driver(self):
+        """Clean up the driver instance safely."""
+        if hasattr(self, 'driver') and self.driver and not self._driver_shared:
+            try:
+                # Store window handles before quitting
+                try:
+                    handles = self.driver.window_handles
+                    if handles:
+                        # Switch to main window and execute script to prevent auto-close
+                        self.driver.switch_to.window(handles[0])
+                        self.driver.execute_script("window.onbeforeunload = function() { return null; };")
+                except Exception:
+                    pass  # Ignore any errors when trying to access window handles
+                
+                # Close all windows first
+                try:
+                    self.driver.close()
+                except Exception:
+                    pass
+
+                # Then quit the driver
+                try:
+                    self.driver.quit()
+                except Exception:
+                    pass
+            finally:
+                self.driver = None
+                self.wait = None
+
+    def on_closing(self):
+        """Handle window closing event"""
+        try:
+            # Save settings before closing
+            self.save_settings()
+            
+            # Cleanup driver
+            if hasattr(self, 'scraper'):
+                self.scraper.cleanup_driver()
+            if hasattr(self, 'driver'):
+                self.cleanup_driver()
+        finally:
+            # Destroy the window
+            self.master.destroy()
+
 if __name__ == '__main__':
-    root = tk.Tk()
-    gui = JobScraperGUI(root)
-    root.mainloop()
+    try:
+        root = tk.Tk()
+        gui = JobScraperGUI(root)
+        root.mainloop()
+    except Exception as e:
+        print(f"Error in main application: {e}")
+    finally:
+        # Ensure cleanup happens even if an error occurs
+        if 'gui' in locals():
+            try:
+                if hasattr(gui, 'scraper'):
+                    gui.scraper.cleanup_driver()
+                if hasattr(gui, 'driver'):
+                    gui.cleanup_driver()
+            except Exception as e:
+                print(f"Error during final cleanup: {e}")
