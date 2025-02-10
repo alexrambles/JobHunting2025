@@ -12,6 +12,7 @@ from selenium.common.exceptions import TimeoutException, NoSuchElementException
 from bs4 import BeautifulSoup
 import os
 import datetime
+import atexit
 
 import argparse
 import logging
@@ -72,48 +73,153 @@ class JobScraper:
         self.driver = None
         self.wait = None
         self._driver_shared = False
-        
-    def setup_driver(self):
-        """Set up undetected ChromeDriver"""
+        self._cleanup_lock = False
+        self._is_cleaned_up = False
+        self._driver_pid = None
+
+    def __del__(self):
+        """Ensure driver is cleaned up when object is deleted, but only if not already cleaned up"""
+        if not self._is_cleaned_up:
+            self.cleanup_driver()
+
+    def _is_driver_running(self):
+        """Check if the Chrome process is still running"""
+        if not self._driver_pid:
+            return False
         try:
-            options = uc.ChromeOptions()
+            import psutil
+            return psutil.pid_exists(self._driver_pid)
+        except (ImportError, Exception):
+            return True  # Assume it's running if we can't check
+
+    def _safe_execute_script(self, script):
+        """Safely execute a script, handling any potential errors"""
+        try:
+            return self.driver.execute_script(script)
+        except Exception:
+            return None
+
+    def _safe_close_windows(self):
+        """Safely close all browser windows"""
+        try:
+            # Try to get window handles
+            try:
+                handles = self.driver.window_handles
+            except Exception:
+                handles = []
+
+            # If we have handles, try to close each window
+            for handle in handles:
+                try:
+                    self.driver.switch_to.window(handle)
+                    self._safe_execute_script("window.onbeforeunload = null;")
+                    self.driver.close()
+                except Exception:
+                    continue
+        except Exception:
+            pass
+
+    def _terminate_chrome_process(self):
+        """Forcefully terminate the Chrome process if it's still running"""
+        if self._driver_pid:
+            try:
+                import psutil
+                process = psutil.Process(self._driver_pid)
+                if process.is_running():
+                    process.terminate()
+                    process.wait(timeout=3)  # Wait for process to terminate
+            except (ImportError, psutil.NoSuchProcess, psutil.TimeoutExpired, Exception):
+                pass
+
+    def cleanup_driver(self):
+        """Clean up the driver instance with enhanced error handling"""
+        if self._cleanup_lock or self._is_cleaned_up:
+            return
             
-            # Basic options for better stability
+        self._cleanup_lock = True
+        try:
+            if self.driver and not self._driver_shared:
+                # Only attempt cleanup if the driver process is still running
+                if self._is_driver_running():
+                    try:
+                        # Try to disable beforeunload event
+                        self._safe_execute_script("window.onbeforeunload = null;")
+                        
+                        # Safely close all windows
+                        self._safe_close_windows()
+                        
+                        # Attempt to quit the driver
+                        try:
+                            self.driver.quit()
+                        except Exception as e:
+                            if "invalid session id" not in str(e).lower() and "no such session" not in str(e).lower():
+                                print(f"Warning: Error during driver quit: {str(e)}")
+                                
+                        # Force terminate the process if it's still running
+                        self._terminate_chrome_process()
+                        
+                    except Exception as e:
+                        print(f"Warning: Error during cleanup: {str(e)}")
+                        # Still try to terminate the process
+                        self._terminate_chrome_process()
+                
+                # Clear the driver reference regardless of cleanup success
+                self.driver = None
+                self.wait = None
+                self._driver_pid = None
+                self._is_cleaned_up = True
+        finally:
+            self._cleanup_lock = False
+
+    def setup_driver(self):
+        """Set up undetected ChromeDriver with enhanced process tracking"""
+        try:
+            if self.driver:
+                self.cleanup_driver()
+                
+            options = uc.ChromeOptions()
             options.add_argument('--start-maximized')
             options.add_argument('--disable-popup-blocking')
             options.add_argument('--disable-notifications')
             options.add_argument('--disable-dev-shm-usage')
             options.add_argument('--no-sandbox')
             
-            # Create driver with longer page load timeout
+            # Add arguments to help with cleanup
+            options.add_argument('--disable-background-networking')
+            options.add_argument('--disable-background-timer-throttling')
+            options.add_argument('--disable-backgrounding-occluded-windows')
+            options.add_argument('--disable-breakpad')
+            options.add_argument('--disable-component-extensions-with-background-pages')
+            options.add_argument('--disable-extensions')
+            options.add_argument('--disable-features=TranslateUI')
+            options.add_argument('--disable-ipc-flooding-protection')
+            options.add_argument('--disable-renderer-backgrounding')
+            options.add_argument('--enable-features=NetworkService,NetworkServiceInProcess')
+            options.add_argument('--force-color-profile=srgb')
+            options.add_argument('--metrics-recording-only')
+            options.add_argument('--no-first-run')
+            
             self.driver = uc.Chrome(options=options)
+            
+            # Store the process ID for later cleanup
+            try:
+                self._driver_pid = self.driver.service.process.pid
+            except Exception:
+                try:
+                    # Fallback to getting PID from service directly
+                    self._driver_pid = self.driver.service.process.pid if self.driver.service.process else None
+                except Exception:
+                    self._driver_pid = None
+                
             self.driver.set_page_load_timeout(30)
             self.wait = WebDriverWait(self.driver, 10)
             self._driver_shared = False
+            self._is_cleaned_up = False
+
             return self.driver
         except Exception as e:
             print(f"Error setting up ChromeDriver: {str(e)}")
             raise
-
-    def cleanup_driver(self):
-        """Clean up the driver instance"""
-        if self.driver and not self._driver_shared:
-            try:
-                # Store window handles before quitting
-                handles = self.driver.window_handles
-                if handles:
-                    # Switch to main window and execute script to prevent auto-close
-                    self.driver.switch_to.window(handles[0])
-                    self.driver.execute_script("window.onbeforeunload = function() { return null; };")
-            except:
-                pass
-            finally:
-                try:
-                    self.driver.quit()
-                except:
-                    pass
-                self.driver = None
-                self.wait = None
 
     def handle_page_load(self, url, max_retries=3):
         """Handle page load with retries"""
@@ -907,10 +1013,22 @@ class JobScraper:
                     scraper.scrape_indeed()
         finally:
             # Clean up the driver if we haven't already and it's not shared
-            if self.driver and not self._driver_shared:
-                self.cleanup_driver()
+
+            if scraper.driver and not scraper._driver_shared:
+                scraper.cleanup_driver()
 
 if __name__ == '__main__':
+    import psutil
+    scraper = None
+    
+    def cleanup_at_exit():
+        global scraper
+        if scraper and not scraper._is_cleaned_up:
+            scraper.cleanup_driver()
+    
+    # Register cleanup function to run at program exit
+    atexit.register(cleanup_at_exit)
+    
     try:
         scraper = JobScraper(
             keywords='data analyst Tableau',
@@ -918,7 +1036,6 @@ if __name__ == '__main__':
             salary_range=(100000, 120000),
             resume='path/to/resume',
             remote_only=True,
-            include_no_salary=False,
             top_percent=10,
             bottom_percent=10
         )
@@ -927,3 +1044,9 @@ if __name__ == '__main__':
             
     except Exception as e:
         print(f"Error: {str(e)}")
+    finally:
+        if scraper:
+            # Ensure immediate cleanup
+            scraper.cleanup_driver()
+            # Unregister the atexit handler since we've already cleaned up
+            atexit.unregister(cleanup_at_exit)
