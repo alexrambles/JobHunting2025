@@ -183,6 +183,7 @@ class JobScraper:
             options.add_argument('--disable-notifications')
             options.add_argument('--disable-dev-shm-usage')
             options.add_argument('--no-sandbox')
+            
             # Add arguments to help with cleanup
             options.add_argument('--disable-background-networking')
             options.add_argument('--disable-background-timer-throttling')
@@ -214,6 +215,7 @@ class JobScraper:
             self.wait = WebDriverWait(self.driver, 10)
             self._driver_shared = False
             self._is_cleaned_up = False
+
             return self.driver
         except Exception as e:
             print(f"Error setting up ChromeDriver: {str(e)}")
@@ -1011,6 +1013,7 @@ class JobScraper:
                     scraper.scrape_indeed()
         finally:
             # Clean up the driver if we haven't already and it's not shared
+
             if scraper.driver and not scraper._driver_shared:
                 scraper.cleanup_driver()
 

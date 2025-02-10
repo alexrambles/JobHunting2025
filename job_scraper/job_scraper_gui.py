@@ -18,9 +18,10 @@ class JobScraperGUI:
         self.master = master
         master.title("Job Scraper Configuration")
         
+
         # Bind window closing event
         master.protocol("WM_DELETE_WINDOW", self.on_closing)
-        
+
         # Settings file path
         self.settings_file = os.path.join(str(Path.home()), '.job_scraper_settings.json')
         
@@ -623,3 +624,4 @@ if __name__ == '__main__':
                     gui.cleanup_driver()
             except Exception as e:
                 print(f"Error during final cleanup: {e}")
+
